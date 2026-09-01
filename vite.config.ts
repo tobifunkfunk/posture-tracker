@@ -2,7 +2,23 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
-export default defineConfig({
+/**
+ * GitHub Pages serves this as a project site at /posture-tracker/, so the
+ * production build needs that base for asset URLs to resolve. Dev stays at /
+ * so `npm run dev` remains a plain http://localhost:5173.
+ *
+ * `import.meta.env.BASE_URL` picks this up automatically, which is what keeps
+ * the MediaPipe wasm and model paths in src/capture/landmarker.ts correct in
+ * both environments.
+ */
+const BASE = '/posture-tracker/';
+
+export default defineConfig(({ command, isPreview }) => ({
+  // `vite preview` reports command as 'serve', so it needs isPreview too —
+  // otherwise it serves at / while the built files expect the base, and every
+  // asset falls through to the index.html fallback.
+  base: command === 'build' || isPreview ? BASE : '/',
+
   /*
    * getUserMedia needs a secure context. http://localhost already counts as
    * one, so plain `npm run dev` stays on http and avoids a certificate the
@@ -23,7 +39,9 @@ export default defineConfig({
         background_color: '#12100e',
         display: 'standalone',
         orientation: 'portrait',
+        // Relative, so it resolves against wherever the manifest is served.
         start_url: '.',
+        scope: '.',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -59,4 +77,4 @@ export default defineConfig({
   ],
   server: { host: true },
   build: { target: 'es2022' },
-});
+}));

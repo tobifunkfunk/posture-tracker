@@ -1,5 +1,10 @@
 # Meditation Posture Tracker
 
+Live at **https://tobifunkfunk.github.io/posture-tracker/** — open it on the
+iPhone and add to Home Screen. Pages serves over HTTPS, which is what the
+camera needs, so this is an easier route onto the phone than the LAN dev
+server.
+
 A PWA that watches your seated posture through a phone on a tripod and turns it
 into numbers you can follow over weeks. Everything runs on the device: no video
 is recorded or transmitted, only joint angles are stored, and there is no server.
@@ -59,7 +64,15 @@ Test on the iPhone over your LAN — this needs real HTTPS for the camera:
 npm run dev:lan
 ```
 
-Accept the self-signed certificate once on the phone, then add to Home Screen.
+Accept the self-signed certificate once on the phone. For anything other than
+active development, the deployed Pages build above is the easier way onto the
+phone.
+
+Check the production build locally, served at the same base path Pages uses:
+
+```bash
+npm run build && npm run preview
+```
 
 ```bash
 npm test
@@ -104,6 +117,7 @@ are smoothed with a One Euro filter and decimated to 1 Hz for storage.
 ## Layout
 
 ```
+.github/       Pages build-and-deploy workflow
 src/posture/   pure geometry — frames, metrics, filter, aggregation, recorder
 src/capture/   camera, MediaPipe wrapper, device orientation
 src/store/     IndexedDB

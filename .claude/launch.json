@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "port": 5173,
       "url": "http://localhost:5173"
+    },
+    {
+      "name": "posture-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "preview", "--port", "4173"],
+      "port": 4173,
+      "url": "http://localhost:4173"
     }
   ]
 }
