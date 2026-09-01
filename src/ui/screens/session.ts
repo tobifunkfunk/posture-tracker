@@ -8,10 +8,11 @@ import { PostureLandmarker, PerfMeter } from '../../capture/landmarker';
 import { TripodWatcher } from '../../capture/orientation';
 import { SessionRecorder } from '../../posture/recorder';
 import type { CameraProfile, PoseFrame } from '../../posture/types';
+import type { Polyline } from '../../posture/contour';
 import { getProfile, getSettings, newId, saveSession, type SessionMode, type Settings } from '../../store/db';
 import { AmbientGlow, Chime, NudgeEngine } from '../../nudge';
 import { LevelGauge, PlumbGauge, RotationGauge } from '../gauges';
-import { drawSkeleton } from '../overlay';
+import { drawOverlay } from '../overlay';
 import { navigate } from '../../router';
 
 export function sessionScreen(root: HTMLElement): () => void {
@@ -127,7 +128,13 @@ export function sessionScreen(root: HTMLElement): () => void {
     if (stream || disposed) return;
     try {
       stream = await startCamera(video, { facingMode: 'user' });
-      landmarker = new PostureLandmarker({ sampleHz: settings!.sampleHz, withFace: settings!.withFace });
+      landmarker = new PostureLandmarker({
+        sampleHz: settings!.sampleHz,
+        withFace: settings!.withFace,
+        // On during setup regardless of mode: seeing your own outline is
+        // how you check the framing.
+        withSegmentation: settings!.overlayStyle !== 'skeleton',
+      });
       await landmarker.load();
       landmarker.start(video, onFrame);
       if (cameraError) {
@@ -144,10 +151,22 @@ export function sessionScreen(root: HTMLElement): () => void {
 
   /* --------------------------------------------------------------- running */
 
-  function onFrame(r: { world: PoseFrame; screen: PoseFrame; inferenceMs: number; timestamp: number }): void {
+  function onFrame(r: {
+    world: PoseFrame; screen: PoseFrame; contours: Polyline[] | null;
+    inferenceMs: number; timestamp: number;
+  }): void {
     if (disposed) return;
     perf.record(r.inferenceMs, r.timestamp);
-    if (mode === 'live' || !running) drawSkeleton(canvas, r.screen);
+
+    // Nothing is visible during a blind sit, so skip the drawing entirely.
+    if (mode === 'live' || !running) {
+      drawOverlay(canvas, {
+        frame: r.screen,
+        contours: r.contours,
+        style: settings!.overlayStyle,
+        showGuides: true,
+      });
+    }
 
     if (!running || !recorder) return;
     const live = recorder.push(r.world, performance.now());
@@ -173,6 +192,14 @@ export function sessionScreen(root: HTMLElement): () => void {
     // Audio must be unlocked from inside the gesture that began the session.
     await chime.unlock();
     await lock.acquire();
+
+    /*
+     * A blind sit draws nothing, so the segmentation mask is pure waste for
+     * however long you sit. Drop it before the clock starts.
+     */
+    if (mode === 'blind' && landmarker && settings.overlayStyle !== 'skeleton') {
+      await landmarker.reconfigure({ withSegmentation: false }, video, onFrame);
+    }
 
     recorder = new SessionRecorder(profile);
     recorder.begin(performance.now());

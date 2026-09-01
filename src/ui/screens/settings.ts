@@ -113,6 +113,16 @@ export function settingsScreen(root: HTMLElement): () => void {
         toggle('Bell at the end', 'A low tone when the planned time is up.',
           () => settings.endBell, (v) => { settings.endBell = v; }),
         el('label', { class: 'field', style: 'margin-top:14px' },
+          el('span', {}, 'Live view'),
+          el('select', {
+            onchange: (e: Event) => { settings.overlayStyle = (e.target as HTMLSelectElement).value as Settings['overlayStyle']; void save(); },
+          },
+            el('option', { value: 'outline', selected: settings.overlayStyle === 'outline' }, 'Body outline'),
+            el('option', { value: 'skeleton', selected: settings.overlayStyle === 'skeleton' }, 'Landmark skeleton'),
+            el('option', { value: 'both', selected: settings.overlayStyle === 'both' }, 'Both')),
+          el('div', { class: 'small muted', style: 'margin-top:4px' },
+            'The outline traces your silhouette, which is easier to read than a stick figure. It costs a little more per frame, so it is switched off automatically during a blind sit.')),
+        el('label', { class: 'field', style: 'margin-top:14px' },
           el('span', {}, 'Default mode'),
           el('select', {
             onchange: (e: Event) => { settings.defaultMode = (e.target as HTMLSelectElement).value as Settings['defaultMode']; void save(); },

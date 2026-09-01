@@ -5,6 +5,7 @@
  */
 import { FilesetResolver, PoseLandmarker, FaceLandmarker } from '@mediapipe/tasks-vision';
 import type { Landmark, PoseFrame } from '../posture/types';
+import { extractContours, type Polyline } from '../posture/contour';
 
 const WASM_PATH = `${import.meta.env.BASE_URL}wasm`;
 const POSE_MODEL = `${import.meta.env.BASE_URL}models/pose_landmarker_lite.task`;
@@ -17,6 +18,12 @@ export interface LandmarkerOptions {
   withFace?: boolean;
   /** GPU is much faster; CPU is the fallback when WebGL is unavailable. */
   delegate?: 'GPU' | 'CPU';
+  /**
+   * Produce a body outline from the segmentation mask. Costs noticeably more
+   * per frame, so it is only worth enabling when something is actually drawn:
+   * calibration framing and live mode, never a blind sit.
+   */
+  withSegmentation?: boolean;
 }
 
 export interface CaptureResult {
@@ -26,6 +33,12 @@ export interface CaptureResult {
   screen: PoseFrame;
   /** FaceLandmarker's 4x4 head transform, when the face model is enabled. */
   faceMatrix: number[] | null;
+  /**
+   * Body outline in normalised image coordinates, when segmentation is on.
+   * Already extracted from the mask, because an MPMask must not outlive the
+   * callback that produced it.
+   */
+  contours: Polyline[] | null;
   /** Wall-clock milliseconds spent inside `detectForVideo`. */
   inferenceMs: number;
   timestamp: number;
@@ -44,7 +57,28 @@ export class PostureLandmarker {
   private lastVideoTime = -1;
   private running = false;
 
-  constructor(private readonly opts: LandmarkerOptions = {}) {}
+  constructor(private opts: LandmarkerOptions = {}) {}
+
+  /**
+   * Rebuild with different options. `outputSegmentationMasks` is fixed at
+   * creation, so switching it off for a blind sit means a new instance —
+   * a one-off cost at the start that pays back over forty minutes of frames.
+   */
+  async reconfigure(
+    opts: Partial<LandmarkerOptions>,
+    video: HTMLVideoElement,
+    onResult: (r: CaptureResult) => void,
+  ): Promise<void> {
+    this.stop();
+    this.pose?.close();
+    this.face?.close();
+    this.pose = null;
+    this.face = null;
+    this.lastVideoTime = -1;
+    this.opts = { ...this.opts, ...opts };
+    await this.load();
+    this.start(video, onResult);
+  }
 
   async load(): Promise<void> {
     const fileset = await FilesetResolver.forVisionTasks(WASM_PATH);
@@ -54,12 +88,12 @@ export class PostureLandmarker {
       baseOptions: { modelAssetPath: POSE_MODEL, delegate },
       runningMode: 'VIDEO',
       numPoses: 1,
+      outputSegmentationMasks: this.opts.withSegmentation ?? false,
       // Nudged above the defaults: a meditator is stationary and well framed,
       // so weak detections are far more likely to be noise than a real body.
       minPoseDetectionConfidence: 0.6,
       minPosePresenceConfidence: 0.6,
       minTrackingConfidence: 0.6,
-      outputSegmentationMasks: false,
     });
 
     if (this.opts.withFace) {
@@ -99,11 +133,32 @@ export class PostureLandmarker {
             faceMatrix = m ? Array.from(m.data) : null;
           }
 
+          /*
+           * Masks hold GPU/CPU buffers that MediaPipe expects back before the
+           * next frame. Trace the outline here and close the mask in a finally,
+           * or a 45 minute session leaks one buffer every 200ms.
+           */
+          let contours: Polyline[] | null = null;
+          const mask = poseResult.segmentationMasks?.[0];
+          if (mask) {
+            try {
+              contours = extractContours(
+                mask.getAsFloat32Array(),
+                mask.width,
+                mask.height,
+                { threshold: 0.5, step: 2, minPoints: 24, smoothIterations: 2 },
+              );
+            } finally {
+              mask.close();
+            }
+          }
+
           if (world && screen) {
             onResult({
               world: toFrame(world),
               screen: toFrame(screen),
               faceMatrix,
+              contours,
               inferenceMs: performance.now() - t0,
               timestamp: now,
             });

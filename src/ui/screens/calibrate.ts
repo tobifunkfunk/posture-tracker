@@ -14,7 +14,7 @@ import {
 import { PoseIdx, type CameraProfile, type PoseFrame } from '../../posture/types';
 import { median } from '../../posture/vec';
 import { newId, saveProfile, getSettings, saveSettings } from '../../store/db';
-import { drawSkeleton } from '../overlay';
+import { drawOverlay } from '../overlay';
 import { navigate } from '../../router';
 
 type Stage = 'intro' | 'framing' | 'level' | 'mirror' | 'reference' | 'done';
@@ -137,12 +137,18 @@ export function calibrateScreen(root: HTMLElement): () => void {
   async function begin(): Promise<void> {
     try {
       stream = await startCamera(video, { facingMode: 'user' });
-      landmarker = new PostureLandmarker({ sampleHz: 8 });
+      landmarker = new PostureLandmarker({ sampleHz: 8, withSegmentation: true });
       await landmarker.load();
       landmarker.start(video, (r) => {
         latest = r.world;
         latestScreen = r.screen;
-        drawSkeleton(canvas, r.screen);
+        drawOverlay(canvas, {
+          frame: r.screen,
+          contours: r.contours,
+          style: 'outline',
+          // Guides would distract from the one job here: get fully in frame.
+          showGuides: false,
+        });
         if (stage === 'framing' || stage === 'mirror') render();
       });
     } catch (err) {

@@ -5,6 +5,7 @@
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { CameraProfile, MetricKey, Sample } from '../posture/types';
+import type { OverlayStyle } from '../ui/overlay';
 
 export type SessionMode = 'blind' | 'live';
 
@@ -38,6 +39,8 @@ export interface Settings {
   sampleHz: number;
   withFace: boolean;
   defaultMode: SessionMode;
+  /** How the live view draws you: body outline, landmark skeleton, or both. */
+  overlayStyle: OverlayStyle;
   activeProfileId: string | null;
   /** Session length in minutes; 0 means open-ended. */
   plannedMinutes: number;
@@ -97,6 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sampleHz: 5,
   withFace: false,
   defaultMode: 'blind',
+  overlayStyle: 'outline',
   activeProfileId: null,
   plannedMinutes: 20,
   startBell: true,
