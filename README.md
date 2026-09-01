@@ -40,13 +40,13 @@ anything two hip landmarks could distinguish.
 
 What the outline genuinely cannot show is depth. Forward lean, pelvis rotation
 and twist all need the hips, so on a bench they are reported as unavailable
-rather than guessed. Calibration detects this and the report hides that
-section, with a note, instead of showing a column of dashes.
+rather than guessed. The app detects this from your sits and the report hides
+that section, with a note, instead of showing a column of dashes.
 
 ## Where to put the camera
 
-Calibration measures the tripod angle, so any placement works. But landmark
-noise lives in the camera frame and depth is much noisier than the image
+The app works out the tripod angle by itself, so any placement works. But
+landmark noise lives in the camera frame and depth is much noisier than the image
 plane, so the angle decides which KPIs get the good axis. Measured by
 simulation (`tests/noise-sensitivity.test.ts`, RMS error in degrees):
 
@@ -101,7 +101,40 @@ glance. Since every trend in this app assumes sessions share a camera pose,
 that is the assumption most worth protecting. Plain and unchanging beats
 patterned and unchanging.
 
-## Why calibration is not optional
+## There is no calibration step
+
+Put the phone on a tripod facing you and sit. The app works out its own setup
+as it goes.
+
+This is possible because of what each KPI is referenced to. Shoulder tilt,
+shoulder height, lateral lean, asymmetry and every head-tilt measure are
+referenced to **gravity**, which the phone reports directly — they are
+absolute, correct from the very first sit, and comparable across sessions with
+no baseline whatsoever. `tests/azimuth-invariance.test.ts` pins exactly which
+metrics these are.
+
+Torso rotation is the one exception, and it is offset *exactly* by any error
+in the assumed camera angle. Being linear, it can be corrected after the fact:
+each sit records with whatever angle is currently believed, then the stored
+values are shifted onto a better estimate once the sit supplies one. That is
+why recording starts immediately rather than after a settling period.
+
+The camera angle itself is **pooled across sessions**. A single camera cannot
+distinguish a tripod standing 10° off-axis from a person sitting rotated 10° —
+that ambiguity is real and no ritual removes it. But where the camera stands
+is fixed while how you sit varies, so the pooled estimate converges on the
+camera and each session's departure from it is you. What survives is *change
+in rotation over time*, which is the useful part; absolute rotation is not
+claimed. A sit whose geometry differs by more than 25° is treated as a moved
+camera and flagged, rather than quietly averaged into the profile.
+
+Gravity is re-read at the start of every sit, so a tripod nudged between
+sessions corrects itself with nothing to remember.
+
+The old calibration screen survives as an optional **camera check** — framing
+plus the live signal-quality meter — but nothing gates on it.
+
+## Why the reference matters anyway
 
 Three biases would each swamp the signal:
 

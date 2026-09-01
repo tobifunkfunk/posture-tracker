@@ -78,7 +78,7 @@ export function calibrateScreen(root: HTMLElement): () => void {
       case 'intro':
         return el('div', {},
           el('p', { class: 'sub' },
-            'Four quick steps. They are what let the app tell a crooked tripod from a crooked spine — without them every angle it reports is partly about the camera.'),
+            'Optional. The app works out its own setup as you sit, so this is only worth doing if you want to check your framing and signal quality, or pin the reference deliberately.'),
           el('div', { class: 'card' },
             el('h3', {}, 'Before you start'),
             el('ul', { class: 'small muted', style: 'padding-left:18px;margin:0' },
@@ -392,6 +392,7 @@ export function calibrateScreen(root: HTMLElement): () => void {
       refTrunkLength: refTrunk,
       gravitySource,
       hipsUsable,
+      sessionCount: 1,
     };
     await saveProfile(profile);
     const settings = await getSettings();
@@ -404,7 +405,7 @@ export function calibrateScreen(root: HTMLElement): () => void {
   /* ----------------------------------------------------------------- mount */
 
   root.append(
-    el('h1', {}, 'Set up the camera'),
+    el('h1', {}, 'Check the camera'),
     el('div', { class: 'stage', style: 'margin-bottom:16px' }, video, canvas),
     body,
   );

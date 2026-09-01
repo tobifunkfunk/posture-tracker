@@ -21,6 +21,8 @@ export interface SessionRecord {
   hipQuality: number;
   /** Set when the tripod moved mid-session; the angles are then not comparable. */
   tripodMoved: boolean;
+  /** Set when this session's geometry did not match the profile's at all. */
+  setupChanged: boolean;
   /** Degrees the camera drifted, when known. */
   tripodDriftDeg: number | null;
   notes: string;
@@ -175,6 +177,27 @@ export async function deleteSession(id: string): Promise<void> {
     tx.objectStore('samples').delete(id),
     tx.done,
   ]);
+}
+
+/**
+ * A profile for a setup nothing is yet known about. Azimuth starts at zero and
+ * converges over the first few sits; gravity is filled in from the sensor at
+ * the start of every session, so it is never stale.
+ */
+export function blankProfile(name = 'My setup'): CameraProfile {
+  return {
+    id: newId(),
+    name,
+    createdAt: Date.now(),
+    gravityDown: { x: 0, y: -1, z: 0 },
+    mirrored: false,
+    azimuth: 0,
+    sessionCount: 0,
+    refShoulderWidth: NaN,
+    refTrunkLength: NaN,
+    gravitySource: 'assumed-level',
+    hipsUsable: false,
+  };
 }
 
 export function newId(): string {

@@ -12,7 +12,14 @@ import type { CameraProfile, PoseFrame } from '../../posture/types';
 import type { Polyline } from '../../posture/contour';
 import type { TrunkAxis } from '../../posture/silhouette';
 import { cameraRollFromGravity } from '../../posture/silhouette';
-import { getProfile, getSettings, newId, saveSession, type SessionMode, type Settings } from '../../store/db';
+import {
+  blankProfile, getProfile, getSettings, listProfiles, newId, saveProfile, saveSession,
+  type SessionMode, type Settings,
+} from '../../store/db';
+import { AutoCalibrator, applyYawCorrection, poolAzimuth } from '../../posture/autocalibrate';
+import { calibrateGravity } from '../../posture/frames';
+import { motionPermissionState, requestMotionPermission, readGravity } from '../../capture/orientation';
+import { toPhysics } from '../../posture/frames';
 import { AmbientGlow, Chime, NudgeEngine } from '../../nudge';
 import { LevelGauge, PlumbGauge, RotationGauge } from '../gauges';
 import { drawOverlay } from '../overlay';
@@ -40,6 +47,8 @@ export function sessionScreen(root: HTMLElement): () => void {
   // Rotation is depth-derived and far noisier than tilt, so the live dial
   // reads a 30 second average rather than the instantaneous value.
   const twistAverage = new RollingMean(30);
+  let calibrator: AutoCalibrator | null = null;
+  let latestWorld: PoseFrame | null = null;
   let nudges: NudgeEngine | null = null;
 
   const video = el('video', { playsinline: true, muted: true, class: 'mirror' });
@@ -61,13 +70,12 @@ export function sessionScreen(root: HTMLElement): () => void {
     if (settings.activeProfileId) profile = (await getProfile(settings.activeProfileId)) ?? null;
 
     if (!profile) {
-      clear(root);
-      root.append(
-        el('h1', {}, 'Sit'),
-        el('div', { class: 'notice' }, 'No camera setup saved yet. Calibration is what makes the numbers mean anything.'),
-        el('button', { class: 'primary block', onclick: () => navigate('#/calibrate') }, 'Set up the camera'),
-      );
-      return;
+      // Fall back to any existing setup before inventing a new one, so a
+      // cleared active-profile setting does not orphan the history.
+      const existing = await listProfiles();
+      profile = existing[0] ?? blankProfile();
+      if (!existing.length) await saveProfile(profile);
+      settings.activeProfileId = profile.id;
     }
 
     nudges = new NudgeEngine(settings.nudges, settings.tolerance);
@@ -79,9 +87,9 @@ export function sessionScreen(root: HTMLElement): () => void {
     const s = settings!;
     append(root,
       el('h1', {}, 'Sit'),
-      el('p', { class: 'sub' }, profile!.gravitySource === 'sensor'
-        ? 'Camera tilt is being corrected from the phone’s sensor.'
-        : 'Camera tilt is assumed level — re-calibrate on the phone for better absolute numbers.'),
+      el('p', { class: 'sub' }, profile!.sessionCount === 0
+        ? 'Just sit. The app measures its own setup as you go — shoulder height and tilt are referenced to gravity and work from the very first sit.'
+        : `Setup learned from ${profile!.sessionCount} sit${profile!.sessionCount === 1 ? '' : 's'}. Tilt is corrected from the phone’s sensor each time.`),
       cameraError
         ? el('div', { class: 'notice bad' },
             el('div', {}, cameraError),
@@ -175,8 +183,16 @@ export function sessionScreen(root: HTMLElement): () => void {
     }
 
     if (!running || !recorder) return;
+    latestWorld = r.world;
     const live = recorder.push(r.world, performance.now(), r.trunkAxis);
     if (!live) return;
+
+    // Every frame tells us a little about where the camera actually stands.
+    calibrator?.observe(
+      live.metrics.torsoYaw,
+      profile!.refShoulderWidth,
+      live.metrics.hipsReliable,
+    );
 
     if (mode === 'live' && settings!.nudges.visual) {
       levelGauge.set(live.metrics.shoulderOnlyTilt);
@@ -195,12 +211,16 @@ export function sessionScreen(root: HTMLElement): () => void {
 
   async function start(): Promise<void> {
     if (!profile || !settings) return;
-    // Audio must be unlocked from inside the gesture that began the session.
+    // Both of these must happen inside the gesture that began the session:
+    // browsers start audio suspended, and iOS only grants motion access from
+    // a user action.
     await chime.unlock();
     await lock.acquire();
+    await measureGravity();
 
     recorder = new SessionRecorder(profile);
     recorder.begin(performance.now());
+    calibrator = new AutoCalibrator(profile.azimuth);
     nudges!.reset();
     twistAverage.reset();
     startedAt = Date.now();
@@ -215,6 +235,34 @@ export function sessionScreen(root: HTMLElement): () => void {
     else showLive();
 
     tickTimer = window.setInterval(tick, 500);
+  }
+
+  /**
+   * Read the phone's gravity vector at the start of every sit.
+   *
+   * Doing it per session rather than once at setup means a tripod that gets
+   * nudged between sits corrects itself, with no ritual and nothing to
+   * remember. The accelerometer's sign convention differs between engines, so
+   * it is resolved against the body the camera can already see.
+   */
+  async function measureGravity(): Promise<void> {
+    if (!profile) return;
+    if (motionPermissionState() === 'prompt') await requestMotionPermission();
+
+    const reading = await readGravity(1600);
+    if (!reading || reading.samples < 5 || reading.stability > 1.2) {
+      statusEl.textContent = profile.gravitySource === 'sensor'
+        ? 'No fresh tilt reading — using the last good one.'
+        : 'No tilt sensor available; assuming the camera is level.';
+      return;
+    }
+
+    const frames = latestWorld ? [toPhysics(latestWorld)] : [];
+    const resolved = calibrateGravity({ reading: reading.vector, sampleFrames: frames });
+    if (resolved.confident || profile.gravitySource !== 'sensor') {
+      profile.gravityDown = resolved.gravityDown;
+      profile.gravitySource = resolved.confident ? 'sensor' : 'assumed-level';
+    }
   }
 
   function tick(): void {
@@ -273,6 +321,30 @@ export function sessionScreen(root: HTMLElement): () => void {
 
     const result = recorder.end(performance.now());
     const drift = tripod.driftDegrees();
+
+    /*
+     * Now that the sit is over, use it to improve the setup estimate. Yaw is
+     * offset exactly by any azimuth error, so the stored samples can simply be
+     * shifted onto the better estimate — which is what allows recording to
+     * begin immediately instead of after a settling period.
+     */
+    let setupChanged = false;
+    const estimate = calibrator?.estimate() ?? null;
+    if (estimate) {
+      const pooled = poolAzimuth(profile.azimuth, profile.sessionCount, estimate);
+      setupChanged = pooled.setupChanged;
+      applyYawCorrection(result.samples, (pooled.azimuth - profile.azimuth) * (180 / Math.PI));
+
+      profile = {
+        ...profile,
+        azimuth: pooled.azimuth,
+        sessionCount: pooled.setupChanged ? 1 : profile.sessionCount + 1,
+        refShoulderWidth: Number.isFinite(calibrator!.shoulderWidth)
+          ? calibrator!.shoulderWidth : profile.refShoulderWidth,
+        hipsUsable: calibrator!.hipsUsable,
+      };
+      await saveProfile(profile);
+    }
     tripod.stop();
     void lock.release();
     if (settings?.endBell) chime.bell(0.3);
@@ -290,6 +362,7 @@ export function sessionScreen(root: HTMLElement): () => void {
         // Beyond about a degree the camera has genuinely moved and the
         // session's angles no longer share a baseline with the others.
         tripodMoved: drift !== null && drift > 1.5,
+        setupChanged,
         tripodDriftDeg: drift,
         notes: '',
       },

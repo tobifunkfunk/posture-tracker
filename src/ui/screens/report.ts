@@ -60,6 +60,10 @@ export function renderReport(
     nodes.push(el('div', { class: 'notice bad' },
       `The camera moved about ${record.tripodDriftDeg?.toFixed(1)}° during this session. Its angles are not comparable with your others.`));
   }
+  if (record.setupChanged) {
+    nodes.push(el('div', { class: 'notice bad' },
+      'This sit was measured from a noticeably different camera angle than your previous ones. The app has adopted the new position, but rotation figures from before this point are not comparable with those after it.'));
+  }
   if (gravitySource !== 'sensor') {
     nodes.push(el('div', { class: 'notice' },
       'This setup was calibrated without a tilt sensor, so any lean in the tripod is baked into these angles. Compare within this setup, not across setups.'));

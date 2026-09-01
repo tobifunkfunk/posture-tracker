@@ -166,6 +166,7 @@ export function profileFor(setup: CameraSetup = {}): CameraProfile {
     refTrunkLength: TRUNK,
     gravitySource: 'sensor',
     hipsUsable: true,
+    sessionCount: 10,
   };
 }
 

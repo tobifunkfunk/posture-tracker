@@ -91,10 +91,15 @@ export interface CameraProfile {
   mirrored: boolean;
 
   /**
-   * Camera azimuth in radians, measured from the reference sit: the angle
-   * the shoulder line makes with the image X axis in the UPRIGHT frame.
+   * Camera azimuth in radians: a running estimate pooled across sessions.
+   * Where the camera stands is fixed while how the sitter faces varies, so
+   * pooling converges on the camera and each session's departure from it is
+   * the person.
    */
   azimuth: number;
+
+  /** Sessions folded into `azimuth` so far, which sets the pooling weight. */
+  sessionCount: number;
 
   /** Median shoulder width (metres) during the reference sit. */
   refShoulderWidth: number;

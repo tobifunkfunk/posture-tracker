@@ -132,6 +132,7 @@ function sessionRow(r: SessionRecord): HTMLElement {
         `${fmtDuration(r.durationMs)} · ${r.mode} · body seen ${fmtPercent(r.quality)}`)),
     el('div', { class: 'row', style: 'gap:6px' },
       r.tripodMoved ? el('span', { class: 'badge bad' }, 'camera moved') : null,
+      r.setupChanged ? el('span', { class: 'badge warn' }, 'new angle') : null,
       r.hipQuality < 0.5 ? el('span', { class: 'badge warn' }, 'hips hidden') : null,
       el('span', { class: 'muted' }, '›')));
 }
