@@ -94,3 +94,50 @@ export class MetricFilterBank {
     for (const f of this.filters.values()) f.reset();
   }
 }
+
+/**
+ * A plain moving average over a fixed time window.
+ *
+ * Rotation KPIs depend on the depth axis, which MediaPipe estimates far less
+ * precisely than the image plane. Simulation puts per-frame twist error at
+ * 3.6-21 degrees across the plausible range of depth noise, so a live twist
+ * readout smoothed like a tilt readout would be showing almost pure noise.
+ * Averaging over ~30s cuts that by the square root of the sample count and
+ * brings it back to something worth looking at. Posture drifts slowly enough
+ * that the lag costs nothing.
+ */
+export class RollingMean {
+  private readonly values: number[] = [];
+  private readonly times: number[] = [];
+
+  constructor(private readonly windowSeconds = 30) {}
+
+  push(value: number, tSeconds: number): number {
+    if (Number.isFinite(value)) {
+      this.values.push(value);
+      this.times.push(tSeconds);
+    }
+    const cutoff = tSeconds - this.windowSeconds;
+    while (this.times.length && this.times[0] < cutoff) {
+      this.times.shift();
+      this.values.shift();
+    }
+    return this.mean;
+  }
+
+  get mean(): number {
+    if (!this.values.length) return NaN;
+    return this.values.reduce((a, b) => a + b, 0) / this.values.length;
+  }
+
+  /** How full the window is, 0..1 — lets the UI say "still settling". */
+  fillFraction(tSeconds: number): number {
+    if (!this.times.length) return 0;
+    return Math.min(1, (tSeconds - this.times[0]) / this.windowSeconds);
+  }
+
+  reset(): void {
+    this.values.length = 0;
+    this.times.length = 0;
+  }
+}

@@ -14,6 +14,7 @@ import {
 import { PoseIdx, type CameraProfile, type PoseFrame } from '../../posture/types';
 import { median } from '../../posture/vec';
 import { newId, saveProfile, getSettings, saveSettings } from '../../store/db';
+import { QualityMeter, qualityAdvice } from '../../posture/quality';
 import { drawOverlay } from '../overlay';
 import { navigate } from '../../router';
 
@@ -35,10 +36,17 @@ export function calibrateScreen(root: HTMLElement): () => void {
   let refWidth = NaN;
   let refTrunk = NaN;
   let statusText = '';
+  const quality = new QualityMeter(60);
 
   const video = el('video', { playsinline: true, muted: true, class: 'mirror' });
   const canvas = el('canvas', { width: 480, height: 640, class: 'mirror' });
   const body = el('div');
+  const qualityPanel = el('div', { class: 'card', style: 'margin-top:10px' });
+  const framingNotice = el('div', { class: 'notice' }, 'Looking for you…');
+  const framingButton = el('button', {
+    class: 'primary block', style: 'margin-top:12px', disabled: true,
+    onclick: () => { stage = 'level'; render(); void measureLevel(); },
+  }, 'Framing looks right');
 
   const render = () => {
     if (disposed) return;
@@ -79,16 +87,9 @@ export function calibrateScreen(root: HTMLElement): () => void {
               el('li', {}, 'Wear something reasonably close-fitting — loose fabric moves the shoulder landmarks more than the asymmetry you are looking for.'))),
           el('button', { class: 'primary block', style: 'margin-top:16px', onclick: () => { stage = 'framing'; render(); void begin(); } }, 'Start calibration'));
 
-      case 'framing': {
-        const ok = framingCheck();
-        return el('div', {},
-          stageList(),
-          el('div', { class: ok.ready ? 'notice good' : 'notice' }, ok.message),
-          el('button', {
-            class: 'primary block', disabled: !ok.ready,
-            onclick: () => { stage = 'level'; render(); void measureLevel(); },
-          }, 'Framing looks right'));
-      }
+      case 'framing':
+        updateFraming();
+        return el('div', {}, stageList(), framingNotice, qualityPanel, framingButton);
 
       case 'level':
         return el('div', {},
@@ -142,6 +143,11 @@ export function calibrateScreen(root: HTMLElement): () => void {
       landmarker.start(video, (r) => {
         latest = r.world;
         latestScreen = r.screen;
+        if (stage === 'framing') {
+          quality.push(toPhysics(r.world));
+          updateFraming();
+          updateQualityPanel();
+        }
         drawOverlay(canvas, {
           frame: r.screen,
           contours: r.contours,
@@ -149,12 +155,54 @@ export function calibrateScreen(root: HTMLElement): () => void {
           // Guides would distract from the one job here: get fully in frame.
           showGuides: false,
         });
-        if (stage === 'framing' || stage === 'mirror') render();
+        if (stage === 'mirror') render();
       });
     } catch (err) {
       statusText = err instanceof CameraError ? err.message : String(err);
       body.prepend(el('div', { class: 'notice bad' }, statusText));
     }
+  }
+
+  /**
+   * Framing feedback, updated in place from the frame callback. Re-rendering
+   * the whole screen at the capture rate would churn the DOM for no reason.
+   */
+  function updateFraming(): void {
+    const ok = framingCheck();
+    framingNotice.className = ok.ready ? 'notice good' : 'notice';
+    framingNotice.textContent = ok.message;
+    framingButton.disabled = !ok.ready;
+  }
+
+  /**
+   * Live measurement quality, so setup choices can be tested rather than
+   * guessed at. Changing the background, the light or the shirt moves the
+   * jitter number within a few seconds.
+   */
+  function updateQualityPanel(): void {
+    const r = quality.read(latestScreen);
+    const tone = r.verdict === 'excellent' || r.verdict === 'good'
+      ? 'good' : r.verdict === 'poor' ? 'bad' : 'warn';
+
+    clear(qualityPanel);
+    qualityPanel.append(
+      el('div', { class: 'row spread', style: 'align-items:center' },
+        el('h3', { style: 'margin:0' }, 'Signal quality'),
+        el('span', { class: `badge ${tone}` }, r.verdict)),
+      el('div', { class: 'kpi' },
+        el('div', {},
+          el('span', { class: 'label' }, 'Steadiness'),
+          el('div', { class: 'hint' }, 'how much the shoulder reading wobbles while you hold still')),
+        el('span', { class: 'value' },
+          r.samples < 20 ? '…' : `±${r.jitterDeg.toFixed(2)}°`)),
+      el('div', { class: 'kpi' },
+        el('div', {},
+          el('span', { class: 'label' }, 'Body visibility'),
+          el('div', { class: 'hint' },
+            r.worstVisibility < 0.6 && r.worstName ? `weakest: ${r.worstName}` : 'all key points seen')),
+        el('span', { class: 'value' }, `${Math.round(r.visibility * 100)}%`)),
+      el('div', { class: 'small muted', style: 'margin-top:6px' }, qualityAdvice(r)),
+    );
   }
 
   /** Everything the KPIs need must be visible, and the body reasonably centred. */

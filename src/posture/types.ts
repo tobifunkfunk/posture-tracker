@@ -130,8 +130,16 @@ export interface PostureMetrics {
   pelvisYaw: number;
   /** KPI 8 — shoulders rotated relative to hips. A rotated cushion cancels out here. */
   torsoTwist: number;
-  /** KPI 9b — head roll from the ear line. + = left ear higher. */
+  /**
+   * KPI 9b — head roll, fused from the eye line and the ear line weighted by
+   * how well each is seen. + = left side higher.
+   */
   headRoll: number;
+  /** Head roll from the outer eye corners alone. Short baseline, but eyes are
+   *  rarely occluded and the model localises them well. */
+  headRollEyes: number;
+  /** Head roll from the ear line alone. Longer baseline, but hair hides ears. */
+  headRollEars: number;
   /** KPI 9b relative to the shoulders — head tilted independently of the trunk. */
   headRollVsShoulders: number;
   /** KPI 10 — head rotation about vertical, relative to the shoulder line. */
@@ -168,6 +176,8 @@ export const METRIC_KEYS = [
   'pelvisYaw',
   'torsoTwist',
   'headRoll',
+  'headRollEyes',
+  'headRollEars',
   'headRollVsShoulders',
   'headYawVsShoulders',
   'headLateralOffset',

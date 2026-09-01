@@ -3,19 +3,16 @@
  * every animation frame: meditation is near-static, and at 5Hz a 45 minute
  * session stays well clear of thermal throttling on a phone.
  */
-import { FilesetResolver, PoseLandmarker, FaceLandmarker } from '@mediapipe/tasks-vision';
+import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
 import type { Landmark, PoseFrame } from '../posture/types';
 import { extractContours, type Polyline } from '../posture/contour';
 
 const WASM_PATH = `${import.meta.env.BASE_URL}wasm`;
 const POSE_MODEL = `${import.meta.env.BASE_URL}models/pose_landmarker_lite.task`;
-const FACE_MODEL = `${import.meta.env.BASE_URL}models/face_landmarker.task`;
 
 export interface LandmarkerOptions {
   /** Inference rate in Hz. 5 is plenty for posture and kind to the battery. */
   sampleHz?: number;
-  /** Load the face model too, for proper head pose. Costs roughly 40% more CPU. */
-  withFace?: boolean;
   /** GPU is much faster; CPU is the fallback when WebGL is unavailable. */
   delegate?: 'GPU' | 'CPU';
   /**
@@ -31,8 +28,6 @@ export interface CaptureResult {
   world: PoseFrame;
   /** Normalised image-space landmarks, used only for drawing the overlay. */
   screen: PoseFrame;
-  /** FaceLandmarker's 4x4 head transform, when the face model is enabled. */
-  faceMatrix: number[] | null;
   /**
    * Body outline in normalised image coordinates, when segmentation is on.
    * Already extracted from the mask, because an MPMask must not outlive the
@@ -52,7 +47,6 @@ function toFrame(points: Array<{ x: number; y: number; z: number; visibility?: n
 
 export class PostureLandmarker {
   private pose: PoseLandmarker | null = null;
-  private face: FaceLandmarker | null = null;
   private timer: number | null = null;
   private lastVideoTime = -1;
   private running = false;
@@ -71,9 +65,7 @@ export class PostureLandmarker {
   ): Promise<void> {
     this.stop();
     this.pose?.close();
-    this.face?.close();
     this.pose = null;
-    this.face = null;
     this.lastVideoTime = -1;
     this.opts = { ...this.opts, ...opts };
     await this.load();
@@ -95,16 +87,6 @@ export class PostureLandmarker {
       minPosePresenceConfidence: 0.6,
       minTrackingConfidence: 0.6,
     });
-
-    if (this.opts.withFace) {
-      this.face = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate },
-        runningMode: 'VIDEO',
-        numFaces: 1,
-        outputFaceBlendshapes: false,
-        outputFacialTransformationMatrixes: true,
-      });
-    }
   }
 
   /** Begin sampling. `onResult` fires at roughly `sampleHz`. */
@@ -125,13 +107,6 @@ export class PostureLandmarker {
           const poseResult = this.pose!.detectForVideo(video, now);
           const world = poseResult.worldLandmarks?.[0];
           const screen = poseResult.landmarks?.[0];
-
-          let faceMatrix: number[] | null = null;
-          if (this.face) {
-            const faceResult = this.face.detectForVideo(video, now);
-            const m = faceResult.facialTransformationMatrixes?.[0];
-            faceMatrix = m ? Array.from(m.data) : null;
-          }
 
           /*
            * Masks hold GPU/CPU buffers that MediaPipe expects back before the
@@ -157,7 +132,6 @@ export class PostureLandmarker {
             onResult({
               world: toFrame(world),
               screen: toFrame(screen),
-              faceMatrix,
               contours,
               inferenceMs: performance.now() - t0,
               timestamp: now,
@@ -184,9 +158,7 @@ export class PostureLandmarker {
   close(): void {
     this.stop();
     this.pose?.close();
-    this.face?.close();
     this.pose = null;
-    this.face = null;
   }
 }
 

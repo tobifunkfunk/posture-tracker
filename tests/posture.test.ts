@@ -174,6 +174,44 @@ describe('KPI 9/10 - head', () => {
     expect(m.headRollVsShoulders).toBeCloseTo(7, 3);
   });
 
+  it('measures head tilt from the eyes and the ears independently', () => {
+    const m = measure({ headRoll: 7 }, { azimuthDeg: 35 });
+    // Both baselines are rigidly attached to the head, so both must agree.
+    expect(m.headRollEyes).toBeCloseTo(7, 3);
+    expect(m.headRollEars).toBeCloseTo(7, 3);
+    expect(m.headRoll).toBeCloseTo(7, 3);
+  });
+
+  it('falls back to the eyes when hair hides the ears', () => {
+    const body = makeBody({ headRoll: 6 });
+    body[PoseIdx.LeftEar].visibility = 0.1;
+    body[PoseIdx.RightEar].visibility = 0.15;
+    const m = computeMetrics(toBodyFrame(project(body), profileFor()), profileFor());
+    expect(m.headRoll).toBeCloseTo(6, 3);
+  });
+
+  it('falls back to the ears when the eyes are not visible', () => {
+    const body = makeBody({ headRoll: 6 });
+    for (const i of [PoseIdx.LeftEye, PoseIdx.LeftEyeOuter, PoseIdx.RightEye, PoseIdx.RightEyeOuter]) {
+      body[i].visibility = 0.1;
+    }
+    const m = computeMetrics(toBodyFrame(project(body), profileFor()), profileFor());
+    expect(m.headRoll).toBeCloseTo(6, 3);
+  });
+
+  it('ignores a degenerate eye line rather than trusting its visibility', () => {
+    const body = makeBody({ headRoll: 8 });
+    // Collapse the eyes onto one point but leave visibility high, which is how
+    // an unpopulated landmark used to poison the fused estimate.
+    for (const i of [PoseIdx.LeftEye, PoseIdx.LeftEyeOuter, PoseIdx.LeftEyeInner,
+                     PoseIdx.RightEye, PoseIdx.RightEyeOuter, PoseIdx.RightEyeInner]) {
+      body[i].x = 0; body[i].y = 0; body[i].z = 0; body[i].visibility = 0.95;
+    }
+    const m = computeMetrics(toBodyFrame(project(body), profileFor()), profileFor());
+    expect(Number.isNaN(m.headRollEyes)).toBe(true);
+    expect(m.headRoll).toBeCloseTo(8, 3);
+  });
+
   it('measures the nose offset from the shoulder midline', () => {
     const straight = measure({});
     expect(straight.headLateralOffset).toBeCloseTo(0, 4);

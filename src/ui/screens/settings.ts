@@ -144,9 +144,7 @@ export function settingsScreen(root: HTMLElement): () => void {
           }),
           el('div', { class: 'small muted', style: 'margin-top:4px' },
             'Meditation is nearly static, so 5 Hz captures everything that matters. Higher rates warm the phone and drain the battery for no real gain.')),
-        toggle('Use the face model for head pose',
-          'More accurate head rotation, at roughly 40% more CPU. Off by default to keep long sits cool.',
-          () => settings.withFace, (v) => { settings.withFace = v; })),
+      ),
 
       el('h2', {}, 'Camera setups'),
       el('div', { class: 'card' },

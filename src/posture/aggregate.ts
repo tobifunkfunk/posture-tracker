@@ -16,6 +16,8 @@ export const DEFAULT_TOLERANCE: Record<MetricKey, number> = {
   pelvisYaw: 5,
   torsoTwist: 4,
   headRoll: 3,
+  headRollEyes: 3,
+  headRollEars: 3,
   headRollVsShoulders: 3,
   headYawVsShoulders: 6,
   headLateralOffset: 0.08,

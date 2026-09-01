@@ -7,6 +7,7 @@ import { startCamera, stopCamera, CameraError, ScreenLock } from '../../capture/
 import { PostureLandmarker, PerfMeter } from '../../capture/landmarker';
 import { TripodWatcher } from '../../capture/orientation';
 import { SessionRecorder } from '../../posture/recorder';
+import { RollingMean } from '../../posture/filter';
 import type { CameraProfile, PoseFrame } from '../../posture/types';
 import type { Polyline } from '../../posture/contour';
 import { getProfile, getSettings, newId, saveSession, type SessionMode, type Settings } from '../../store/db';
@@ -34,6 +35,9 @@ export function sessionScreen(root: HTMLElement): () => void {
   const glow = new AmbientGlow();
   const tripod = new TripodWatcher();
   const perf = new PerfMeter();
+  // Rotation is depth-derived and far noisier than tilt, so the live dial
+  // reads a 30 second average rather than the instantaneous value.
+  const twistAverage = new RollingMean(30);
   let nudges: NudgeEngine | null = null;
 
   const video = el('video', { playsinline: true, muted: true, class: 'mirror' });
@@ -130,7 +134,6 @@ export function sessionScreen(root: HTMLElement): () => void {
       stream = await startCamera(video, { facingMode: 'user' });
       landmarker = new PostureLandmarker({
         sampleHz: settings!.sampleHz,
-        withFace: settings!.withFace,
         // On during setup regardless of mode: seeing your own outline is
         // how you check the framing.
         withSegmentation: settings!.overlayStyle !== 'skeleton',
@@ -175,7 +178,7 @@ export function sessionScreen(root: HTMLElement): () => void {
     if (mode === 'live' && settings!.nudges.visual) {
       levelGauge.set(live.metrics.shoulderOnlyTilt);
       plumbGauge.set(live.metrics.lateralLean);
-      rotationGauge.set(live.metrics.torsoTwist);
+      rotationGauge.set(twistAverage.push(live.metrics.torsoTwist, live.elapsedMs / 1000));
     }
 
     const decision = nudges!.evaluate(live.metrics, performance.now());
@@ -204,6 +207,7 @@ export function sessionScreen(root: HTMLElement): () => void {
     recorder = new SessionRecorder(profile);
     recorder.begin(performance.now());
     nudges!.reset();
+    twistAverage.reset();
     startedAt = Date.now();
     running = true;
 
@@ -255,9 +259,11 @@ export function sessionScreen(root: HTMLElement): () => void {
         el('div', { class: 'row', style: 'gap:4px' },
           el('div', { style: 'flex:1;text-align:center' }, el('h3', {}, 'Shoulders'), levelGauge.root),
           el('div', { style: 'flex:1;text-align:center' }, el('h3', {}, 'Lean'), plumbGauge.root),
-          el('div', { style: 'flex:1;text-align:center' }, el('h3', {}, 'Twist'), rotationGauge.root))),
+          el('div', { style: 'flex:1;text-align:center' }, el('h3', {}, 'Twist (30s)'), rotationGauge.root))),
       el('div', { class: 'card small muted' },
-        'The shoulder gauge already has whole-body lean subtracted, so it shows asymmetry rather than listing.'),
+        'The shoulder gauge already has whole-body lean subtracted, so it shows asymmetry rather than listing. '
+        + 'Twist is averaged over 30 seconds — it is derived from depth, which the model estimates far less precisely, '
+        + 'so an instantaneous reading would be mostly noise.'),
     );
     root.append(panel);
   }
@@ -291,7 +297,6 @@ export function sessionScreen(root: HTMLElement): () => void {
         tripodMoved: drift !== null && drift > 1.5,
         tripodDriftDeg: drift,
         notes: '',
-        headSource: settings?.withFace ? 'face-model' : 'pose-fallback',
       },
       result.samples,
     );

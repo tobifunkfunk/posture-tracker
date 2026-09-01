@@ -23,6 +23,57 @@ three correlated numbers as if they were independent:
 | `shoulderOnlyTilt` | Shoulder tilt with whole-body lean subtracted. A shoulder that drops *because the trunk lists* reads zero here; only genuine girdle asymmetry survives. |
 | `torsoTwist` | Shoulder rotation minus pelvis rotation. A cushion sitting at an angle turns both together and cancels; only a real twist survives. |
 | `headYawVsShoulders` | Head rotation relative to the torso, so "head turned" is separate from "whole body turned". |
+| `headRoll` | Head tilt, fused from the eye line and the ear line by visibility. Ears give a longer baseline and so less angular noise; eyes are rarely hidden. Whichever is actually visible carries the estimate. |
+
+## Where to put the camera
+
+Calibration measures the tripod angle, so any placement works. But landmark
+noise lives in the camera frame and depth is much noisier than the image
+plane, so the angle decides which KPIs get the good axis. Measured by
+simulation (`tests/noise-sensitivity.test.ts`, RMS error in degrees):
+
+| camera | shoulder tilt | shoulder asymmetry | lateral lean | forward lean | twist |
+|---|---|---|---|---|---|
+| **front (0°)** | 2.10 | **2.39** | **1.06** | 3.10 | 14.6 |
+| oblique (35°) | 2.14 | 2.94 | 2.01 | 2.62 | 12.7 |
+| side (90°) | 2.17 | 3.76 | 3.12 | **1.05** | **5.4** |
+
+**Straight in front is the best placement for shoulder height and body tilt** —
+lateral lean is three times more accurate frontal than side-on. Move the
+tripod off-axis only if forward slump is what you care about most.
+
+Shoulder tilt itself barely cares about the angle: it is a vertical
+difference, and vertical is always well observed.
+
+**Twist is noisy at every angle.** It rides the hip line, whose short baseline
+amplifies depth error. Per frame it is unusable, so the live dial shows a
+30-second average and the report leans on session means, where the error falls
+by the square root of the sample count to well under a degree.
+
+## Helping the detection
+
+The app shows a live **signal quality** panel during calibration: how much the
+shoulder reading wobbles while you hold still, in degrees. That is the number
+to optimise, and it makes setup an experiment rather than a guess — change one
+thing, watch it move.
+
+What reliably helps:
+
+- **Even, frontal light.** Backlight is the single worst thing; a bright window
+  behind you reduces you to a silhouette.
+- **A plain background that contrasts with your clothing.** This mainly helps
+  the outline, which is derived from a segmentation mask.
+- **Close-fitting, plain clothing.** Loose fabric moves the apparent shoulder
+  point by more than the asymmetry being measured.
+- **Wearing the same thing each time.** Trends are the product here, so
+  removing a variable beats optimising it.
+
+What does not help: patterned or striped clothing (it does nothing for
+landmark accuracy and can confuse the segmentation), and a gridded or lined
+backdrop. The pose model is a neural network trained on natural images — it
+does not triangulate against background features, so reference marks behind
+you are ignored. A grid would only earn its place as a *camera* reference, for
+detecting tripod tilt without the phone's sensor, which is not implemented.
 
 ## Why calibration is not optional
 

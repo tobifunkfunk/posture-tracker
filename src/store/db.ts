@@ -24,8 +24,6 @@ export interface SessionRecord {
   /** Degrees the camera drifted, when known. */
   tripodDriftDeg: number | null;
   notes: string;
-  /** Whether the head KPIs came from the face model or the coarser ear-line fallback. */
-  headSource: 'face-model' | 'pose-fallback';
 }
 
 export interface SampleBlock {
@@ -37,7 +35,6 @@ export interface SampleBlock {
 export interface Settings {
   id: 'settings';
   sampleHz: number;
-  withFace: boolean;
   defaultMode: SessionMode;
   /** How the live view draws you: body outline, landmark skeleton, or both. */
   overlayStyle: OverlayStyle;
@@ -98,7 +95,6 @@ export function db(): Promise<IDBPDatabase<PostureDB>> {
 export const DEFAULT_SETTINGS: Settings = {
   id: 'settings',
   sampleHz: 5,
-  withFace: false,
   defaultMode: 'blind',
   overlayStyle: 'outline',
   activeProfileId: null,

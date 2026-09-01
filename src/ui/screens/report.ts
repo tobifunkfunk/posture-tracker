@@ -11,8 +11,8 @@ import { lineChart, scatterChart } from '../charts/line';
 import { navigate } from '../../router';
 
 /** The metrics worth leading with; the rest live under "everything else". */
-const HEADLINE: MetricKey[] = ['shoulderOnlyTilt', 'shoulderDropMm', 'lateralLean', 'sagittalLean', 'torsoTwist', 'headYawVsShoulders'];
-const SECONDARY: MetricKey[] = ['shoulderTilt', 'torsoYaw', 'pelvisYaw', 'headRoll', 'headRollVsShoulders', 'headLateralOffset', 'shoulderDropRatio'];
+const HEADLINE: MetricKey[] = ['shoulderOnlyTilt', 'shoulderDropMm', 'lateralLean', 'sagittalLean', 'headRollVsShoulders', 'torsoTwist'];
+const SECONDARY: MetricKey[] = ['shoulderTilt', 'torsoYaw', 'pelvisYaw', 'headRollEyes', 'headRollEars', 'headLateralOffset', 'shoulderDropRatio'];
 
 export function reportScreen(root: HTMLElement, id: string): () => void {
   let disposed = false;
@@ -126,7 +126,6 @@ export function renderReport(record: SessionRecord, samples: Sample[], gravitySo
     el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Body detected'), el('span', { class: 'value' }, fmtPercent(quality.upper))),
     el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Hips usable'), el('span', { class: 'value' }, fmtPercent(quality.hips))),
     el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Samples stored'), el('span', { class: 'value' }, String(samples.length))),
-    el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Head source'), el('span', { class: 'value' }, record.headSource === 'face-model' ? 'face model' : 'ear line (coarse)')),
   ));
 
   nodes.push(el('div', { class: 'row', style: 'margin-top:20px;gap:8px' },

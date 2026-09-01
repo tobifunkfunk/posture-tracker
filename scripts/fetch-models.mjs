@@ -15,12 +15,6 @@ const MODELS = [
     file: 'pose_landmarker_lite.task',
     url: `${BASE}/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task`,
   },
-  {
-    // Optional: only fetched because the face model can be switched on in
-    // settings for more accurate head pose.
-    file: 'face_landmarker.task',
-    url: `${BASE}/face_landmarker/face_landmarker/float16/latest/face_landmarker.task`,
-  },
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));

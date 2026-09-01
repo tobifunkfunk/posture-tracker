@@ -14,6 +14,11 @@ const HIP_HALF = 0.09;
 const TRUNK = 0.55;
 const NECK = 0.25;
 const EAR_HALF = 0.075;
+const EYE_OUTER_HALF = 0.045;
+const EYE_CENTRE_HALF = 0.032;
+const EYE_INNER_HALF = 0.018;
+const EYE_RISE = 0.02;
+const EYE_FORWARD = 0.08;
 
 export interface BodyPose {
   /** Whole-trunk roll, degrees. Positive leans to the subject's LEFT. */
@@ -75,6 +80,22 @@ export function makeBody(pose: BodyPose = {}, visibility = 0.95): PoseFrame {
   const leOff = applyMat3(headM, vec(EAR_HALF, 0, 0));
   const reOff = applyMat3(headM, vec(-EAR_HALF, 0, 0));
   const noseOff = applyMat3(headM, vec(0, 0.02, 0.11));
+
+  // Eyes sit forward of the ear axis and slightly above it. Outer corners are
+  // the widest reliable pair, which is what the roll metric prefers.
+  const eye = (dx: number) => applyMat3(headM, vec(dx, EYE_RISE, EYE_FORWARD));
+  const eyePoints: Array<[number, number]> = [
+    [PoseIdx.LeftEyeOuter, EYE_OUTER_HALF],
+    [PoseIdx.LeftEye, EYE_CENTRE_HALF],
+    [PoseIdx.LeftEyeInner, EYE_INNER_HALF],
+    [PoseIdx.RightEyeOuter, -EYE_OUTER_HALF],
+    [PoseIdx.RightEye, -EYE_CENTRE_HALF],
+    [PoseIdx.RightEyeInner, -EYE_INNER_HALF],
+  ];
+  for (const [idx, dx] of eyePoints) {
+    const off = eye(dx);
+    put(frame, idx, vec(headOrigin.x + off.x, headOrigin.y + off.y, headOrigin.z + off.z), visibility);
+  }
   put(frame, PoseIdx.LeftEar, vec(headOrigin.x + leOff.x, headOrigin.y + leOff.y, headOrigin.z + leOff.z), visibility);
   put(frame, PoseIdx.RightEar, vec(headOrigin.x + reOff.x, headOrigin.y + reOff.y, headOrigin.z + reOff.z), visibility);
   put(frame, PoseIdx.Nose, vec(headOrigin.x + noseOff.x, headOrigin.y + noseOff.y, headOrigin.z + noseOff.z), visibility);
@@ -147,4 +168,4 @@ export function profileFor(setup: CameraSetup = {}): CameraProfile {
   };
 }
 
-export const DIMS = { SHOULDER_HALF, HIP_HALF, TRUNK, NECK, EAR_HALF };
+export const DIMS = { SHOULDER_HALF, HIP_HALF, TRUNK, NECK, EAR_HALF, EYE_OUTER_HALF };

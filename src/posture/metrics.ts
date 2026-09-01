@@ -11,6 +11,26 @@ import { mid, sub, toDeg } from './vec';
 export const HIP_VISIBILITY_FLOOR = 0.5;
 export const UPPER_VISIBILITY_FLOOR = 0.6;
 
+/**
+ * Combine two estimates of the same angle, weighted by how well each source
+ * was seen. Falls back to whichever is usable when the other is not.
+ *
+ * The ear baseline is roughly 1.7x the eye baseline, so when both are equally
+ * visible the ear estimate is given proportionally more weight.
+ */
+function fuse(a: number, visA: number, b: number, visB: number): number {
+  const okA = Number.isFinite(a) && visA > 0.5;
+  const okB = Number.isFinite(b) && visB > 0.5;
+  if (okA && okB) {
+    const wa = visA * 1.7;
+    const wb = visB;
+    return (a * wa + b * wb) / (wa + wb);
+  }
+  if (okA) return a;
+  if (okB) return b;
+  return Number.isFinite(a) ? a : b;
+}
+
 /** Angle of `v` away from vertical, in the plane spanned by `axis` and up. */
 function tiltFromVertical(v: Vec3, axis: 'x' | 'z'): number {
   return toDeg(Math.atan2(v[axis], v.y));
@@ -23,6 +43,11 @@ function tiltFromVertical(v: Vec3, axis: 'x' | 'z'): number {
  */
 function yawOfLine(line: Vec3): number {
   return -toDeg(Math.atan2(line.z, line.x));
+}
+
+/** Euclidean length of a line vector. */
+function lineLength(v: Vec3): number {
+  return Math.hypot(v.x, v.y, v.z);
 }
 
 /** Tilt of a left-right body line away from horizontal. + = left end higher. */
@@ -86,9 +111,39 @@ export function computeMetrics(frame: PoseFrame, profile: CameraProfile): Postur
   // vanishes here; only a real twist between them survives.
   const torsoTwist = shoulderLine && hipLine ? torsoYaw - pelvisYaw : NaN;
 
-  const earLine = le && re ? sub(le, re) : null;
-  const headRoll = earLine ? tiltOfLine(earLine) : NaN;
-  const headRollVsShoulders = earLine && shoulderLine ? headRoll - shoulderTilt : NaN;
+  /*
+   * Head roll is measured twice, because the two available baselines fail in
+   * opposite ways. The ear line is long (~15cm), which suppresses angular
+   * noise, but hair and hoods hide ears constantly. The eye line is short
+   * (~9cm across the outer corners), so the same positional error becomes a
+   * bigger angle — but eyes are almost always visible and the model localises
+   * them well. Fusing by visibility uses whichever is actually working.
+   */
+  const earLineRaw = le && re ? sub(le, re) : null;
+  const earLine = earLineRaw && lineLength(earLineRaw) > 0.02 ? earLineRaw : null;
+  const headRollEars = earLine ? tiltOfLine(earLine) : NaN;
+
+  // Outer corners rather than eye centres: a wider baseline for the same
+  // landmark error is a directly better angle.
+  const leo = frame[PoseIdx.LeftEyeOuter];
+  const reo = frame[PoseIdx.RightEyeOuter];
+  const lec = frame[PoseIdx.LeftEye];
+  const rec = frame[PoseIdx.RightEye];
+  const eyeA = leo && leo.visibility > 0.5 ? leo : lec;
+  const eyeB = reo && reo.visibility > 0.5 ? reo : rec;
+  const eyeLine = eyeA && eyeB ? sub(eyeA, eyeB) : null;
+  // A degenerate line has no angle to report, whatever visibility claims.
+  const headRollEyes = eyeLine && lineLength(eyeLine) > 0.02 ? tiltOfLine(eyeLine) : NaN;
+
+  const earVis = Math.min(le?.visibility ?? 0, re?.visibility ?? 0);
+  const eyeVis = Math.min(eyeA?.visibility ?? 0, eyeB?.visibility ?? 0);
+  const headRoll = fuse(headRollEars, earVis, headRollEyes, eyeVis);
+
+  const headRollVsShoulders =
+    Number.isFinite(headRoll) && shoulderLine ? headRoll - shoulderTilt : NaN;
+
+  // Yaw still comes from the ears: it depends on the depth axis, and the eyes
+  // are too close together in depth to resolve a rotation from.
   const headYaw = earLine ? yawOfLine(earLine) : NaN;
   const headYawVsShoulders = earLine && shoulderLine ? headYaw - torsoYaw : NaN;
 
@@ -106,41 +161,14 @@ export function computeMetrics(frame: PoseFrame, profile: CameraProfile): Postur
     pelvisYaw,
     torsoTwist,
     headRoll,
+    headRollEyes,
+    headRollEars,
     headRollVsShoulders,
     headYawVsShoulders,
     headLateralOffset,
     upperQuality,
     hipQuality,
     hipsReliable,
-  };
-}
-
-/**
- * Head pose from FaceLandmarker's 4x4 transformation matrix, which is far
- * more accurate than inferring rotation from the ear line. Column-major, as
- * MediaPipe emits it. Returns degrees in the camera's own frame; the caller
- * rotates it into the BODY frame before comparing against the torso.
- */
-export function headPoseFromMatrix(m: number[]): { yaw: number; pitch: number; roll: number } | null {
-  if (!m || m.length < 16) return null;
-  // Column-major 4x4 -> rotation entries r[row][col].
-  const r00 = m[0]; const r10 = m[1];
-  const r11 = m[5];
-  const r02 = m[8]; const r12 = m[9]; const r22 = m[10];
-
-  // Y-X-Z (yaw-pitch-roll) extraction, guarding the gimbal-lock pole.
-  const sy = Math.hypot(r00, r10);
-  if (sy < 1e-6) {
-    return {
-      yaw: toDeg(Math.atan2(-r02, r22)),
-      pitch: toDeg(Math.atan2(-r12, sy)),
-      roll: 0,
-    };
-  }
-  return {
-    yaw: toDeg(Math.atan2(r02, r22)),
-    pitch: toDeg(Math.atan2(-r12, Math.hypot(r02, r22))),
-    roll: toDeg(Math.atan2(r10, r11)),
   };
 }
 
@@ -155,8 +183,10 @@ export const METRIC_META: Record<string, { label: string; unit: string; short: s
   torsoYaw: { label: 'Torso rotation', unit: '°', short: 'Torso yaw', positive: 'turned left', negative: 'turned right', hipDependent: false },
   pelvisYaw: { label: 'Pelvis rotation', unit: '°', short: 'Pelvis yaw', positive: 'turned left', negative: 'turned right', hipDependent: true },
   torsoTwist: { label: 'Twist (shoulders vs hips)', unit: '°', short: 'Twist', positive: 'twisted left', negative: 'twisted right', hipDependent: true },
-  headRoll: { label: 'Head roll', unit: '°', short: 'Head roll', positive: 'left ear higher', negative: 'right ear higher', hipDependent: false },
-  headRollVsShoulders: { label: 'Head roll vs shoulders', unit: '°', short: 'Head roll rel.', positive: 'left ear higher', negative: 'right ear higher', hipDependent: false },
+  headRoll: { label: 'Head tilt', unit: '°', short: 'Head tilt', positive: 'left side higher', negative: 'right side higher', hipDependent: false },
+  headRollEyes: { label: 'Head tilt (eyes)', unit: '°', short: 'Eyes', positive: 'left eye higher', negative: 'right eye higher', hipDependent: false },
+  headRollEars: { label: 'Head tilt (ears)', unit: '°', short: 'Ears', positive: 'left ear higher', negative: 'right ear higher', hipDependent: false },
+  headRollVsShoulders: { label: 'Head tilt vs shoulders', unit: '°', short: 'Head tilt rel.', positive: 'left side higher', negative: 'right side higher', hipDependent: false },
   headYawVsShoulders: { label: 'Head rotation vs shoulders', unit: '°', short: 'Head yaw rel.', positive: 'turned left', negative: 'turned right', hipDependent: false },
   headLateralOffset: { label: 'Head sideways offset', unit: '×width', short: 'Head offset', positive: 'to the left', negative: 'to the right', hipDependent: false },
 };
