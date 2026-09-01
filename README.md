@@ -25,6 +25,24 @@ three correlated numbers as if they were independent:
 | `headYawVsShoulders` | Head rotation relative to the torso, so "head turned" is separate from "whole body turned". |
 | `headRoll` | Head tilt, fused from the eye line and the ear line by visibility. Ears give a longer baseline and so less angular noise; eyes are rarely hidden. Whichever is actually visible carries the estimate. |
 
+## The trunk axis comes from the outline, not the hips
+
+Hips are the wrong landmark for seated meditation. On a bench or kneeling
+stool they are occluded or oddly posed, and MediaPipe's estimate degrades
+accordingly — yet lateral lean, and therefore shoulder asymmetry, used to hang
+entirely off the hip midpoint.
+
+The silhouette does the job better. Taking the horizontal centroid of the body
+at each height across the chest fits a centre line through thousands of pixels
+instead of two guessed points, and it lives in the image plane, which is the
+axis the camera observes best. In testing it resolves a 1.5° lean, well below
+anything two hip landmarks could distinguish.
+
+What the outline genuinely cannot show is depth. Forward lean, pelvis rotation
+and twist all need the hips, so on a bench they are reported as unavailable
+rather than guessed. Calibration detects this and the report hides that
+section, with a note, instead of showing a column of dashes.
+
 ## Where to put the camera
 
 Calibration measures the tripod angle, so any placement works. But landmark
@@ -68,12 +86,20 @@ What reliably helps:
 - **Wearing the same thing each time.** Trends are the product here, so
   removing a variable beats optimising it.
 
-What does not help: patterned or striped clothing (it does nothing for
-landmark accuracy and can confuse the segmentation), and a gridded or lined
-backdrop. The pose model is a neural network trained on natural images — it
-does not triangulate against background features, so reference marks behind
-you are ignored. A grid would only earn its place as a *camera* reference, for
-detecting tripod tilt without the phone's sensor, which is not implemented.
+What does not help: patterned or striped clothing. It does nothing for
+landmark accuracy and actively risks confusing the segmentation the outline is
+built from — and the outline is now what measures your lean, so that matters
+more than it used to.
+
+A **fixed background** is worth setting up, but not for the reason it seems.
+The pose model is a neural network trained on natural images; it does not
+triangulate against background features, so reference marks behind you are
+simply ignored, and a grid or ruled sheet buys nothing for detection. What a
+constant background is genuinely good for is telling you the *setup* has not
+drifted: same room, same wall, same marks, so a changed frame is visible at a
+glance. Since every trend in this app assumes sessions share a camera pose,
+that is the assumption most worth protecting. Plain and unchanging beats
+patterned and unchanging.
 
 ## Why calibration is not optional
 

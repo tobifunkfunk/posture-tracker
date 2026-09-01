@@ -13,7 +13,7 @@ import {
 import { Chime } from '../../nudge';
 import { navigate } from '../../router';
 
-const NUDGEABLE: MetricKey[] = ['shoulderOnlyTilt', 'lateralLean', 'sagittalLean', 'torsoTwist', 'headYawVsShoulders'];
+const NUDGEABLE: MetricKey[] = ['shoulderOnlyTilt', 'lateralLean', 'headRollVsShoulders', 'headYawVsShoulders'];
 
 export function settingsScreen(root: HTMLElement): () => void {
   let disposed = false;

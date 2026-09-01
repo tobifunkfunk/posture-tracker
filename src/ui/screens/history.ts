@@ -10,7 +10,7 @@ import type { CameraProfile, MetricKey } from '../../posture/types';
 import { sparkline } from '../charts/line';
 import { navigate } from '../../router';
 
-const TRENDED: MetricKey[] = ['shoulderOnlyTilt', 'lateralLean', 'sagittalLean', 'torsoTwist'];
+const TRENDED: MetricKey[] = ['shoulderOnlyTilt', 'lateralLean', 'torsoYaw', 'headRollVsShoulders'];
 
 export function historyScreen(root: HTMLElement): () => void {
   let disposed = false;

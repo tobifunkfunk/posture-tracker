@@ -165,6 +165,7 @@ export function profileFor(setup: CameraSetup = {}): CameraProfile {
     refShoulderWidth: SHOULDER_HALF * 2,
     refTrunkLength: TRUNK,
     gravitySource: 'sensor',
+    hipsUsable: true,
   };
 }
 

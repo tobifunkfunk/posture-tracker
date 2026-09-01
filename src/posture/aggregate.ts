@@ -106,11 +106,12 @@ export function summarize(samples: Sample[], opts: SummaryOptions = {}): Record<
   const duration = samples.length ? samples[samples.length - 1].t : 0;
 
   for (const key of METRIC_KEYS) {
-    const hipDependent = HIP_DEPENDENT.has(key);
     const usable = samples.filter((s) => {
       const v = s.metrics[key];
       if (typeof v !== 'number' || !Number.isFinite(v)) return false;
-      return hipDependent ? s.metrics.hipsReliable : true;
+      if (LEAN_DEPENDENT.has(key)) return s.metrics.leanSource !== 'none';
+      if (HIP_ONLY.has(key)) return s.metrics.hipsReliable;
+      return true;
     });
 
     const ys = usable.map((s) => s.metrics[key] as number);
@@ -170,13 +171,8 @@ export function summarize(samples: Sample[], opts: SummaryOptions = {}): Record<
   return out;
 }
 
-const HIP_DEPENDENT = new Set<MetricKey>([
-  'lateralLean',
-  'shoulderOnlyTilt',
-  'sagittalLean',
-  'pelvisYaw',
-  'torsoTwist',
-]);
+const LEAN_DEPENDENT = new Set<MetricKey>(['lateralLean', 'shoulderOnlyTilt']);
+const HIP_ONLY = new Set<MetricKey>(['sagittalLean', 'pelvisYaw', 'torsoTwist']);
 
 /**
  * Pearson correlation between two metrics across a session — the direct
@@ -209,9 +205,14 @@ export function correlate(samples: Sample[], a: MetricKey, b: MetricKey): { r: n
 }
 
 /** Fraction of samples where the pose was detected well enough to use. */
-export function sessionQuality(samples: Sample[]): { upper: number; hips: number; overall: number } {
-  if (!samples.length) return { upper: 0, hips: 0, overall: 0 };
+export function sessionQuality(samples: Sample[]): {
+  upper: number; hips: number; lean: number; overall: number;
+} {
+  if (!samples.length) return { upper: 0, hips: 0, lean: 0, overall: 0 };
   const upper = samples.filter((s) => s.metrics.upperQuality >= 0.6).length / samples.length;
   const hips = samples.filter((s) => s.metrics.hipsReliable).length / samples.length;
-  return { upper, hips, overall: Math.min(upper, (upper + hips) / 2) };
+  const lean = samples.filter((s) => s.metrics.leanSource !== 'none').length / samples.length;
+  // Overall quality tracks what the headline KPIs actually need: the upper
+  // body and a trunk axis. Hips are optional now.
+  return { upper, hips, lean, overall: Math.min(upper, lean) };
 }

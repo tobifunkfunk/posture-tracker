@@ -104,6 +104,13 @@ export interface CameraProfile {
 
   /** Whether gravity came from a real sensor or was assumed level. */
   gravitySource: 'sensor' | 'manual' | 'assumed-level';
+
+  /**
+   * Whether the hips were actually visible during calibration. Sitting on a
+   * bench or kneeling stool usually means no, in which case the depth and
+   * pelvis KPIs are hidden rather than left showing dashes forever.
+   */
+  hipsUsable: boolean;
 }
 
 /** The KPIs, computed per frame in the BODY frame. Angles in degrees. */
@@ -151,18 +158,28 @@ export interface PostureMetrics {
   upperQuality: number;
   /** Lowest visibility among the hip landmarks, which cross-legged sitting often hides. */
   hipQuality: number;
-  /** False when hip quality is too low to trust lean, pelvis yaw or twist. */
+  /** False when hip quality is too low to trust forward lean or pelvis yaw. */
   hipsReliable: boolean;
+  /**
+   * Where the trunk axis came from. The silhouette is preferred: it fits a
+   * centre line through thousands of pixels in the well-observed image plane,
+   * where the hip landmarks are two guessed points that a bench or kneeling
+   * stool hides completely.
+   */
+  leanSource: 'silhouette' | 'hips' | 'none';
 }
 
-/** Which metrics depend on the hips, and so get gated by `hipsReliable`. */
-export const HIP_DEPENDENT_METRICS = [
-  'lateralLean',
-  'shoulderOnlyTilt',
-  'sagittalLean',
-  'pelvisYaw',
-  'torsoTwist',
-] as const;
+/**
+ * Metrics that need a trunk axis, from either source. Gated on `leanSource`.
+ */
+export const LEAN_DEPENDENT_METRICS = ['lateralLean', 'shoulderOnlyTilt'] as const;
+
+/**
+ * Metrics that need the hip landmarks specifically, because they measure
+ * depth or pelvis rotation that no frontal silhouette can show. Unavailable
+ * on a bench or kneeling stool, and reported as such rather than guessed.
+ */
+export const HIP_ONLY_METRICS = ['sagittalLean', 'pelvisYaw', 'torsoTwist'] as const;
 
 /** Every metric key, in display order. */
 export const METRIC_KEYS = [

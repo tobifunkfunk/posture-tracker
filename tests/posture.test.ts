@@ -219,6 +219,47 @@ describe('KPI 9/10 - head', () => {
   });
 });
 
+describe('silhouette trunk axis', () => {
+  it('prefers the silhouette lean over the hip-derived one', () => {
+    const body = makeBody({ lateralLean: 2 });
+    const frame = toBodyFrame(project(body), profileFor());
+    const withOverride = computeMetrics(frame, profileFor(), { lateralLean: 7 });
+    expect(withOverride.lateralLean).toBeCloseTo(7, 6);
+    expect(withOverride.leanSource).toBe('silhouette');
+  });
+
+  it('feeds the silhouette lean through to shoulder asymmetry', () => {
+    // A pure body roll: the shoulder line tilts by -6 and the trunk leans +6,
+    // so a correct lean measurement must cancel it to zero.
+    const body = makeBody({ lateralLean: 6 });
+    const frame = toBodyFrame(project(body), profileFor());
+    const m = computeMetrics(frame, profileFor(), { lateralLean: 6 });
+    expect(m.shoulderOnlyTilt).toBeCloseTo(0, 4);
+  });
+
+  it('works with the hips completely invisible', () => {
+    const body = makeBody({ lateralLean: 5, shoulderExtraTilt: 3 });
+    for (const i of [PoseIdx.LeftHip, PoseIdx.RightHip]) body[i].visibility = 0.05;
+    const m = computeMetrics(toBodyFrame(project(body), profileFor()), profileFor(), {
+      lateralLean: 5,
+    });
+    expect(m.hipsReliable).toBe(false);
+    expect(m.leanSource).toBe('silhouette');
+    expect(m.lateralLean).toBeCloseTo(5, 4);
+    expect(m.shoulderOnlyTilt).toBeCloseTo(3, 3);
+    // Depth and pelvis rotation are honestly unavailable rather than guessed.
+    expect(Number.isNaN(m.sagittalLean)).toBe(true);
+    expect(Number.isNaN(m.torsoTwist)).toBe(true);
+    expect(Number.isNaN(m.pelvisYaw)).toBe(true);
+  });
+
+  it('falls back to the hips when no silhouette is available', () => {
+    const m = measure({ lateralLean: 4 });
+    expect(m.leanSource).toBe('hips');
+    expect(m.lateralLean).toBeCloseTo(4, 4);
+  });
+});
+
 describe('hip gating', () => {
   it('flags hips as unreliable when the cushion hides them', () => {
     const body = makeBody({});
@@ -342,17 +383,41 @@ describe('session aggregation', () => {
     expect(s.shoulderTilt.timeInTolerance).toBeLessThan(1);
   });
 
-  it('excludes hip-dependent metrics when the hips were not visible', () => {
+  it('keeps lean when the silhouette supplied it, even with no hips at all', () => {
+    // A meditation bench hides the hips completely, which used to disqualify
+    // the lean KPIs. The silhouette makes them independent of that.
     const samples: Sample[] = Array.from({ length: 100 }, (_, i) => ({
       t: i * 1000,
-      metrics: { ...measure({}), hipsReliable: i < 20, lateralLean: 3 },
+      metrics: {
+        ...measure({}),
+        hipsReliable: false,
+        leanSource: 'silhouette' as const,
+        lateralLean: 3,
+        sagittalLean: 2,
+      },
     }));
     const s = summarize(samples);
-    expect(s.lateralLean.n).toBe(20);
-    expect(s.lateralLean.lowConfidence).toBe(true);
-    // The shoulder KPI does not depend on the hips and keeps every sample.
-    expect(s.shoulderTilt.n).toBe(100);
-    expect(s.shoulderTilt.lowConfidence).toBe(false);
+    expect(s.lateralLean.n).toBe(100);
+    expect(s.lateralLean.lowConfidence).toBe(false);
+    expect(s.shoulderOnlyTilt.n).toBe(100);
+    // Depth genuinely is not visible in a frontal outline, so it stays gated.
+    expect(s.sagittalLean.n).toBe(0);
+  });
+
+  it('drops every trunk metric when no axis could be found at all', () => {
+    const samples: Sample[] = Array.from({ length: 50 }, (_, i) => ({
+      t: i * 1000,
+      metrics: {
+        ...measure({}),
+        hipsReliable: false,
+        leanSource: 'none' as const,
+        lateralLean: 3,
+      },
+    }));
+    const s = summarize(samples);
+    expect(s.lateralLean.n).toBe(0);
+    // Shoulder tilt needs no trunk axis and survives regardless.
+    expect(s.shoulderTilt.n).toBe(50);
   });
 
   it('correlates tilt with lean so linked problems are visible', () => {

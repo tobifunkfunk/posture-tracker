@@ -10,6 +10,8 @@ import { SessionRecorder } from '../../posture/recorder';
 import { RollingMean } from '../../posture/filter';
 import type { CameraProfile, PoseFrame } from '../../posture/types';
 import type { Polyline } from '../../posture/contour';
+import type { TrunkAxis } from '../../posture/silhouette';
+import { cameraRollFromGravity } from '../../posture/silhouette';
 import { getProfile, getSettings, newId, saveSession, type SessionMode, type Settings } from '../../store/db';
 import { AmbientGlow, Chime, NudgeEngine } from '../../nudge';
 import { LevelGauge, PlumbGauge, RotationGauge } from '../gauges';
@@ -134,9 +136,10 @@ export function sessionScreen(root: HTMLElement): () => void {
       stream = await startCamera(video, { facingMode: 'user' });
       landmarker = new PostureLandmarker({
         sampleHz: settings!.sampleHz,
-        // On during setup regardless of mode: seeing your own outline is
-        // how you check the framing.
-        withSegmentation: settings!.overlayStyle !== 'skeleton',
+        // Always on: the outline is not decoration, it is where the trunk
+        // axis comes from now that the hips are not relied on.
+        withSegmentation: true,
+        cameraRollRad: cameraRollFromGravity(profile!.gravityDown),
       });
       await landmarker.load();
       landmarker.start(video, onFrame);
@@ -156,7 +159,7 @@ export function sessionScreen(root: HTMLElement): () => void {
 
   function onFrame(r: {
     world: PoseFrame; screen: PoseFrame; contours: Polyline[] | null;
-    inferenceMs: number; timestamp: number;
+    trunkAxis: TrunkAxis | null; inferenceMs: number; timestamp: number;
   }): void {
     if (disposed) return;
     perf.record(r.inferenceMs, r.timestamp);
@@ -172,7 +175,7 @@ export function sessionScreen(root: HTMLElement): () => void {
     }
 
     if (!running || !recorder) return;
-    const live = recorder.push(r.world, performance.now());
+    const live = recorder.push(r.world, performance.now(), r.trunkAxis);
     if (!live) return;
 
     if (mode === 'live' && settings!.nudges.visual) {
@@ -195,14 +198,6 @@ export function sessionScreen(root: HTMLElement): () => void {
     // Audio must be unlocked from inside the gesture that began the session.
     await chime.unlock();
     await lock.acquire();
-
-    /*
-     * A blind sit draws nothing, so the segmentation mask is pure waste for
-     * however long you sit. Drop it before the clock starts.
-     */
-    if (mode === 'blind' && landmarker && settings.overlayStyle !== 'skeleton') {
-      await landmarker.reconfigure({ withSegmentation: false }, video, onFrame);
-    }
 
     recorder = new SessionRecorder(profile);
     recorder.begin(performance.now());

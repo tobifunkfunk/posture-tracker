@@ -6,6 +6,8 @@
 import { FilesetResolver, PoseLandmarker } from '@mediapipe/tasks-vision';
 import type { Landmark, PoseFrame } from '../posture/types';
 import { extractContours, type Polyline } from '../posture/contour';
+import { chestBand, trunkAxisFromMask, type TrunkAxis } from '../posture/silhouette';
+import { PoseIdx } from '../posture/types';
 
 const WASM_PATH = `${import.meta.env.BASE_URL}wasm`;
 const POSE_MODEL = `${import.meta.env.BASE_URL}models/pose_landmarker_lite.task`;
@@ -15,6 +17,8 @@ export interface LandmarkerOptions {
   sampleHz?: number;
   /** GPU is much faster; CPU is the fallback when WebGL is unavailable. */
   delegate?: 'GPU' | 'CPU';
+  /** Camera roll in radians, so the trunk axis is measured from true vertical. */
+  cameraRollRad?: number;
   /**
    * Produce a body outline from the segmentation mask. Costs noticeably more
    * per frame, so it is only worth enabling when something is actually drawn:
@@ -34,6 +38,11 @@ export interface CaptureResult {
    * callback that produced it.
    */
   contours: Polyline[] | null;
+  /**
+   * Trunk centre line fitted across the chest, when segmentation is on. This
+   * replaces the hip landmarks as the source of lateral lean.
+   */
+  trunkAxis: TrunkAxis | null;
   /** Wall-clock milliseconds spent inside `detectForVideo`. */
   inferenceMs: number;
   timestamp: number;
@@ -114,15 +123,29 @@ export class PostureLandmarker {
            * or a 45 minute session leaks one buffer every 200ms.
            */
           let contours: Polyline[] | null = null;
+          let trunkAxis: TrunkAxis | null = null;
           const mask = poseResult.segmentationMasks?.[0];
           if (mask) {
             try {
-              contours = extractContours(
-                mask.getAsFloat32Array(),
-                mask.width,
-                mask.height,
-                { threshold: 0.5, step: 2, minPoints: 24, smoothIterations: 2 },
-              );
+              const data = mask.getAsFloat32Array();
+              contours = extractContours(data, mask.width, mask.height, {
+                threshold: 0.5, step: 2, minPoints: 24, smoothIterations: 2,
+              });
+
+              // The band is anchored to the shoulders so it tracks the body
+              // rather than a fixed slice of the frame.
+              const ls = screen?.[PoseIdx.LeftShoulder];
+              const rs = screen?.[PoseIdx.RightShoulder];
+              if (ls && rs && Math.min(ls.visibility ?? 0, rs.visibility ?? 0) > 0.6) {
+                const band = chestBand(
+                  (ls.y + rs.y) / 2,
+                  Math.abs(ls.x - rs.x),
+                );
+                trunkAxis = trunkAxisFromMask(
+                  data, mask.width, mask.height, band.yStart, band.yEnd,
+                  { threshold: 0.5, step: 2, cameraRollRad: this.opts.cameraRollRad ?? 0 },
+                );
+              }
             } finally {
               mask.close();
             }
@@ -133,6 +156,7 @@ export class PostureLandmarker {
               world: toFrame(world),
               screen: toFrame(screen),
               contours,
+              trunkAxis,
               inferenceMs: performance.now() - t0,
               timestamp: now,
             });

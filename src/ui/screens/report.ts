@@ -11,8 +11,10 @@ import { lineChart, scatterChart } from '../charts/line';
 import { navigate } from '../../router';
 
 /** The metrics worth leading with; the rest live under "everything else". */
-const HEADLINE: MetricKey[] = ['shoulderOnlyTilt', 'shoulderDropMm', 'lateralLean', 'sagittalLean', 'headRollVsShoulders', 'torsoTwist'];
-const SECONDARY: MetricKey[] = ['shoulderTilt', 'torsoYaw', 'pelvisYaw', 'headRollEyes', 'headRollEars', 'headLateralOffset', 'shoulderDropRatio'];
+const HEADLINE: MetricKey[] = ['shoulderOnlyTilt', 'shoulderDropMm', 'lateralLean', 'torsoYaw', 'headRollVsShoulders'];
+const SECONDARY: MetricKey[] = ['shoulderTilt', 'headRollEyes', 'headRollEars', 'headLateralOffset', 'shoulderDropRatio'];
+/** Only meaningful when the hips are visible, which a bench or stool prevents. */
+const HIP_ONLY: MetricKey[] = ['sagittalLean', 'pelvisYaw', 'torsoTwist'];
 
 export function reportScreen(root: HTMLElement, id: string): () => void {
   let disposed = false;
@@ -27,13 +29,22 @@ export function reportScreen(root: HTMLElement, id: string): () => void {
     const profile = await getProfile(data.record.profileId);
     if (disposed) return;
     clear(root);
-    root.append(...renderReport(data.record, data.samples, profile?.gravitySource ?? 'assumed-level'));
+    root.append(...renderReport(
+      data.record, data.samples,
+      profile?.gravitySource ?? 'assumed-level',
+      profile?.hipsUsable ?? false,
+    ));
   })();
 
   return () => { disposed = true; };
 }
 
-export function renderReport(record: SessionRecord, samples: Sample[], gravitySource: string): HTMLElement[] {
+export function renderReport(
+  record: SessionRecord,
+  samples: Sample[],
+  gravitySource: string,
+  hipsUsable: boolean,
+): HTMLElement[] {
   const summary = summarize(samples);
   const quality = sessionQuality(samples);
 
@@ -53,9 +64,9 @@ export function renderReport(record: SessionRecord, samples: Sample[], gravitySo
     nodes.push(el('div', { class: 'notice' },
       'This setup was calibrated without a tilt sensor, so any lean in the tripod is baked into these angles. Compare within this setup, not across setups.'));
   }
-  if (quality.hips < 0.5) {
+  if (quality.lean < 0.7) {
     nodes.push(el('div', { class: 'notice' },
-      `Your hips were only clearly visible ${fmtPercent(quality.hips)} of the time — normal when sitting cross-legged. Lean, twist and forward-slump numbers below rest on that smaller slice.`));
+      `A trunk axis could only be measured for ${fmtPercent(quality.lean)} of this sit, so the lean and asymmetry figures rest on that slice. Usually this means the chest was partly out of frame.`));
   }
   if (samples.length < 30) {
     nodes.push(el('div', { class: 'notice bad' }, 'Too short to say much. Under a minute of clean data.'));
@@ -90,7 +101,7 @@ export function renderReport(record: SessionRecord, samples: Sample[], gravitySo
 
   /* The timeline for the metric that actually moved most. */
   const mostActive = [...HEADLINE]
-    .filter((k) => METRIC_META[k].unit === '°')
+    .filter((k) => METRIC_META[k].unit === '°' && summary[k].n > 10)
     .sort((a, b) => (summary[b].sd || 0) - (summary[a].sd || 0))[0];
   if (mostActive && summary[mostActive].n > 10) {
     nodes.push(el('h2', {}, `Over the session — ${METRIC_META[mostActive].label.toLowerCase()}`));
@@ -121,10 +132,27 @@ export function renderReport(record: SessionRecord, samples: Sample[], gravitySo
   for (const key of SECONDARY) rest.append(metricRow(summary[key]));
   nodes.push(rest);
 
+  /*
+   * Depth and pelvis rotation need the hip landmarks. On a bench or kneeling
+   * stool they are simply not visible, so the section is omitted with a note
+   * rather than shown as a column of dashes.
+   */
+  if (hipsUsable) {
+    nodes.push(el('h2', {}, 'Depth and pelvis'));
+    const hips = el('div', { class: 'card' });
+    for (const key of HIP_ONLY) hips.append(metricRow(summary[key]));
+    nodes.push(hips);
+  } else {
+    nodes.push(el('h2', {}, 'Depth and pelvis'));
+    nodes.push(el('div', { class: 'card muted small' },
+      'Not measured. Forward lean and pelvis twist need the hip landmarks, which are not visible in this setup — normal on a bench or kneeling stool. '
+      + 'Everything above is measured from the shoulders and the body outline and is unaffected.'));
+  }
+
   nodes.push(el('h2', {}, 'Data quality'));
   nodes.push(el('div', { class: 'card' },
     el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Body detected'), el('span', { class: 'value' }, fmtPercent(quality.upper))),
-    el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Hips usable'), el('span', { class: 'value' }, fmtPercent(quality.hips))),
+    el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Trunk axis found'), el('span', { class: 'value' }, fmtPercent(quality.lean))),
     el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Samples stored'), el('span', { class: 'value' }, String(samples.length))),
   ));
 

@@ -8,7 +8,8 @@
  */
 import { METRIC_KEYS, type CameraProfile, type PoseFrame, type PostureMetrics, type Sample } from './types';
 import { toBodyFrame } from './frames';
-import { computeMetrics } from './metrics';
+import { computeMetrics, type MetricOverrides } from './metrics';
+import type { TrunkAxis } from './silhouette';
 import { MetricFilterBank } from './filter';
 
 export interface LiveState {
@@ -25,6 +26,8 @@ export class SessionRecorder {
   private bucketStartMs = 0;
   private bucket: PostureMetrics[] = [];
   private startedAt = 0;
+  // Tracked separately: a session legitimately starting at t=0 is falsy.
+  private started = false;
   private lastLive: PostureMetrics | null = null;
   private usableFrames = 0;
   private hipFrames = 0;
@@ -34,6 +37,7 @@ export class SessionRecorder {
 
   begin(nowMs = performance.now()): void {
     this.startedAt = nowMs;
+    this.started = true;
     this.bucketStartMs = 0;
   }
 
@@ -41,12 +45,12 @@ export class SessionRecorder {
    * Feed one raw MediaPipe world frame. Returns the smoothed live state, or
    * null before the session has begun.
    */
-  push(world: PoseFrame, nowMs = performance.now()): LiveState | null {
-    if (!this.startedAt) return null;
+  push(world: PoseFrame, nowMs = performance.now(), trunkAxis: TrunkAxis | null = null): LiveState | null {
+    if (!this.started) return null;
 
     const elapsedMs = nowMs - this.startedAt;
     const body = toBodyFrame(world, this.profile);
-    const raw = computeMetrics(body, this.profile);
+    const raw = computeMetrics(body, this.profile, this.overridesFrom(trunkAxis));
     const smoothed = this.filters.filter(raw, elapsedMs / 1000, METRIC_KEYS);
 
     this.totalFrames++;
@@ -66,6 +70,21 @@ export class SessionRecorder {
     return { metrics: smoothed, count: this.stored.length, elapsedMs };
   }
 
+  /**
+   * Turn the silhouette's image-space lean into the body convention.
+   *
+   * The outline is measured in the raw frame, so a mirrored feed flips its
+   * sense: unmirrored, the subject's left appears on the image right.
+   * A poor fit — an arm swung out, a partly occluded chest — is discarded
+   * rather than trusted.
+   */
+  private overridesFrom(trunkAxis: TrunkAxis | null): MetricOverrides {
+    if (!trunkAxis) return {};
+    if (trunkAxis.coverage < 0.6 || trunkAxis.residual > 0.05) return {};
+    const lean = this.profile.mirrored ? -trunkAxis.leanImageDeg : trunkAxis.leanImageDeg;
+    return Number.isFinite(lean) ? { lateralLean: lean } : {};
+  }
+
   private flushBucket(tMs: number): void {
     if (!this.bucket.length) return;
     const averaged = averageMetrics(this.bucket);
@@ -78,7 +97,7 @@ export class SessionRecorder {
     this.flushBucket(this.bucketStartMs * 1000);
     return {
       samples: this.stored,
-      durationMs: this.startedAt ? nowMs - this.startedAt : 0,
+      durationMs: this.started ? nowMs - this.startedAt : 0,
       quality: this.totalFrames ? this.usableFrames / this.totalFrames : 0,
       hipQuality: this.totalFrames ? this.hipFrames / this.totalFrames : 0,
     };

@@ -35,6 +35,7 @@ export function calibrateScreen(root: HTMLElement): () => void {
   let azimuth = 0;
   let refWidth = NaN;
   let refTrunk = NaN;
+  let hipsUsable = false;
   let statusText = '';
   const quality = new QualityMeter(60);
 
@@ -123,7 +124,17 @@ export function calibrateScreen(root: HTMLElement): () => void {
             el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Camera tilt corrected'), el('span', { class: 'value' }, gravitySource === 'sensor' ? 'yes, from sensor' : 'assumed level')),
             el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Feed mirrored'), el('span', { class: 'value' }, mirrored ? 'yes' : 'no')),
             el('div', { class: 'kpi' }, el('span', { class: 'label' }, 'Shoulder width'), el('span', { class: 'value' }, fmt(refWidth * 100, ' cm'))),
+            el('div', { class: 'kpi' },
+              el('div', {},
+                el('span', { class: 'label' }, 'Trunk axis from'),
+                el('div', { class: 'hint' }, 'the body outline, fitted across your chest')),
+              el('span', { class: 'value' }, 'silhouette')),
           ),
+          !hipsUsable
+            ? el('div', { class: 'notice', style: 'margin-top:12px' },
+                'Your hips are not visible in this setup, which is normal on a bench or kneeling stool. '
+                + 'Shoulder height, tilt and rotation all work as usual. Forward lean and pelvis twist need the hips, so they are switched off for this setup.')
+            : null,
           gravitySource !== 'sensor'
             ? el('div', { class: 'notice', style: 'margin-top:12px' },
                 'No tilt sensor reading, so the app is assuming the camera is level. Shoulder-height numbers will carry whatever tilt the tripod has. Trends stay usable; absolute values do not.')
@@ -208,16 +219,15 @@ export function calibrateScreen(root: HTMLElement): () => void {
   /** Everything the KPIs need must be visible, and the body reasonably centred. */
   function framingCheck(): { ready: boolean; message: string } {
     if (!latestScreen) return { ready: false, message: 'Looking for you…' };
-    const need = [PoseIdx.LeftShoulder, PoseIdx.RightShoulder, PoseIdx.LeftHip, PoseIdx.RightHip, PoseIdx.Nose];
+    /*
+     * Hips are deliberately not required. The trunk axis is fitted from the
+     * silhouette, so a bench or kneeling stool that hides the hips entirely is
+     * a perfectly good setup — it only costs the depth and pelvis KPIs.
+     */
+    const need = [PoseIdx.LeftShoulder, PoseIdx.RightShoulder, PoseIdx.Nose];
     const missing = need.filter((i) => (latestScreen![i]?.visibility ?? 0) < 0.5);
     if (missing.length) {
-      const hips = missing.some((i) => i === PoseIdx.LeftHip || i === PoseIdx.RightHip);
-      return {
-        ready: false,
-        message: hips
-          ? 'Your hips are not clearly visible. Move the camera back, or drape less over your lap — the lean and twist numbers depend on them.'
-          : 'Move so your head, shoulders and hips are all in frame.',
-      };
+      return { ready: false, message: 'Move so your head, shoulders and chest are all in frame.' };
     }
     const ls = latestScreen[PoseIdx.LeftShoulder];
     const rs = latestScreen[PoseIdx.RightShoulder];
@@ -325,6 +335,8 @@ export function calibrateScreen(root: HTMLElement): () => void {
     const uprightFrames: PoseFrame[] = [];
     const widths: number[] = [];
     const trunks: number[] = [];
+    let hipFrames = 0;
+    let totalFrames = 0;
     const gm = gravityMatrix(gravityDown);
 
     for (let i = 0; i < 60 && !disposed; i++) {
@@ -341,6 +353,12 @@ export function calibrateScreen(root: HTMLElement): () => void {
       if (quality < 0.6) continue;
 
       uprightFrames.push(upright);
+      totalFrames++;
+      const hipVis = Math.min(
+        upright[PoseIdx.LeftHip]?.visibility ?? 0,
+        upright[PoseIdx.RightHip]?.visibility ?? 0,
+      );
+      if (hipVis >= 0.5) hipFrames++;
       widths.push(landmarkDistance(upright[PoseIdx.LeftShoulder], upright[PoseIdx.RightShoulder]));
       const t = trunkVector(upright);
       if (t) trunks.push(Math.hypot(t.x, t.y, t.z));
@@ -352,6 +370,11 @@ export function calibrateScreen(root: HTMLElement): () => void {
       render();
       return;
     }
+
+    // If the hips were rarely seen during a careful reference sit, they will
+    // not appear during a real one either. Say so once rather than showing
+    // dashes for the rest of the profile's life.
+    hipsUsable = totalFrames > 0 && hipFrames / totalFrames > 0.6;
 
     const result = calibrateAzimuth(uprightFrames);
     azimuth = result.azimuth;
@@ -368,6 +391,7 @@ export function calibrateScreen(root: HTMLElement): () => void {
       refShoulderWidth: refWidth,
       refTrunkLength: refTrunk,
       gravitySource,
+      hipsUsable,
     };
     await saveProfile(profile);
     const settings = await getSettings();

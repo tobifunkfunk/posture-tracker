@@ -40,8 +40,9 @@ export class NudgeEngine {
     for (const key of this.settings.metrics) {
       const value = metrics[key];
       if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-      // Do not scold someone over hips the model could not see.
-      if (HIP_DEPENDENT.has(key) && !metrics.hipsReliable) continue;
+      // Do not scold someone over a measurement that was not available.
+      if (LEAN_DEPENDENT.has(key) && metrics.leanSource === 'none') continue;
+      if (HIP_ONLY.has(key) && !metrics.hipsReliable) continue;
 
       const tol = this.tolerance[key] ?? DEFAULT_TOLERANCE[key];
       const excess = (Math.abs(value) - tol) / Math.max(tol, 1e-6);
@@ -72,9 +73,8 @@ export class NudgeEngine {
   }
 }
 
-const HIP_DEPENDENT = new Set<MetricKey>([
-  'lateralLean', 'shoulderOnlyTilt', 'sagittalLean', 'pelvisYaw', 'torsoTwist',
-]);
+const LEAN_DEPENDENT = new Set<MetricKey>(['lateralLean', 'shoulderOnlyTilt']);
+const HIP_ONLY = new Set<MetricKey>(['sagittalLean', 'pelvisYaw', 'torsoTwist']);
 
 /**
  * A soft synthesised tone. Generated rather than sampled so the PWA carries

@@ -61,7 +61,20 @@ function tiltOfLine(line: Vec3): number {
  * `frame` must already have been through `toBodyFrame`, otherwise the numbers
  * describe the camera as much as the meditator.
  */
-export function computeMetrics(frame: PoseFrame, profile: CameraProfile): PostureMetrics {
+export interface MetricOverrides {
+  /**
+   * Trunk lean measured from the silhouette, in degrees, already in the body
+   * convention (+ = leaning to the subject's left). Preferred over the
+   * hip-derived value whenever it is available.
+   */
+  lateralLean?: number;
+}
+
+export function computeMetrics(
+  frame: PoseFrame,
+  profile: CameraProfile,
+  overrides: MetricOverrides = {},
+): PostureMetrics {
   const ls = frame[PoseIdx.LeftShoulder];
   const rs = frame[PoseIdx.RightShoulder];
   const lh = frame[PoseIdx.LeftHip];
@@ -94,8 +107,20 @@ export function computeMetrics(frame: PoseFrame, profile: CameraProfile): Postur
   const shoulderDropMm = ls && rs ? (ls.y - rs.y) * 1000 : NaN;
   const shoulderDropRatio = ls && rs && width > 0 ? (ls.y - rs.y) / width : NaN;
 
-  const lateralLean = trunk ? tiltFromVertical(trunk, 'x') : NaN;
-  const sagittalLean = trunk ? tiltFromVertical(trunk, 'z') : NaN;
+  /*
+   * Lean prefers the silhouette. Its centre line is fitted from thousands of
+   * pixels in the image plane, where the hip-derived version rests on two
+   * landmarks that a meditation bench hides entirely.
+   */
+  const hipLean = trunk && hipsReliable ? tiltFromVertical(trunk, 'x') : NaN;
+  const silhouetteLean = overrides.lateralLean;
+  const lateralLean = Number.isFinite(silhouetteLean) ? (silhouetteLean as number) : hipLean;
+  const leanSource: PostureMetrics['leanSource'] = Number.isFinite(silhouetteLean)
+    ? 'silhouette'
+    : Number.isFinite(hipLean) ? 'hips' : 'none';
+
+  // Depth is invisible in a frontal outline, so forward lean still needs hips.
+  const sagittalLean = trunk && hipsReliable ? tiltFromVertical(trunk, 'z') : NaN;
 
   /*
    * Roll the whole rigid body left by alpha and the shoulder line tilts by
@@ -103,13 +128,15 @@ export function computeMetrics(frame: PoseFrame, profile: CameraProfile): Postur
    * the sum is asymmetry the trunk does not explain: one shoulder genuinely
    * riding higher than the other rather than the whole torso listing.
    */
-  const shoulderOnlyTilt = shoulderLine && trunk ? shoulderTilt + lateralLean : NaN;
+  const shoulderOnlyTilt =
+    shoulderLine && Number.isFinite(lateralLean) ? shoulderTilt + lateralLean : NaN;
 
   const torsoYaw = shoulderLine ? yawOfLine(shoulderLine) : NaN;
-  const pelvisYaw = hipLine ? yawOfLine(hipLine) : NaN;
+  const pelvisYaw = hipLine && hipsReliable ? yawOfLine(hipLine) : NaN;
   // A cushion sitting at an angle turns shoulders and hips together and
   // vanishes here; only a real twist between them survives.
-  const torsoTwist = shoulderLine && hipLine ? torsoYaw - pelvisYaw : NaN;
+  const torsoTwist =
+    shoulderLine && hipLine && hipsReliable ? torsoYaw - pelvisYaw : NaN;
 
   /*
    * Head roll is measured twice, because the two available baselines fail in
@@ -169,6 +196,7 @@ export function computeMetrics(frame: PoseFrame, profile: CameraProfile): Postur
     upperQuality,
     hipQuality,
     hipsReliable,
+    leanSource,
   };
 }
 
